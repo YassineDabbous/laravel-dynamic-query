@@ -125,12 +125,19 @@ trait HasDynamicFields{
 
         $requestedRelations = array_intersect($dynamicRelationsNames, $list);
         if(count($requestedRelations)){
-            $rs = array_unique($requestedRelations);
-            foreach ($rs as $r) {
-                if(array_key_exists($r, $this->deepFields)) {
-                    $q->with($r, fn($rq) => $rq->dynamicSelect($this->deepFields[$r]));
+            $uniqueRelations = array_unique($requestedRelations);
+            foreach ($uniqueRelations as $relationName) {
+                if(array_key_exists($relationName, $this->deepFields)) {
+                    // Get the foreign key(s) for the current relationship.
+                    $relationDependencies = (array) ($dynamicRelations[$relationName] ?? []);
+                    // Get the fields the user requested for this deep relation.
+                    $deepFields = $this->deepFields[$relationName];
+                    
+                    $fieldsForRelation = array_unique(array_merge($deepFields, $relationDependencies));
+
+                    $q->with($relationName, fn($rq) => $rq->dynamicSelect($fieldsForRelation));
                 } else {
-                    $q->with($r);
+                    $q->with($relationName);
                 }
             }
         }
@@ -139,15 +146,18 @@ trait HasDynamicFields{
         $dynamicAggregatesNames = array_keys($dynamicAggregates);
 
         if(!in_array('*', $list)){
-            if(count($this->dynamicColumns())){
-                $requestedColumns = array_intersect($this->dynamicColumns(), $list);
+            $selectableColumns = $this->dynamicColumns();
+
+            if(count($selectableColumns)){
+                 // This prevents trying to select relation names like "children" as columns.
+                $requestedColumns = array_intersect($selectableColumns, $list);
             } else {
-                $x = [
+                $nonColumnFields = [
                     ...$dynamicRelationsNames,
                     ...$dynamicAggregatesNames,
                     ...$dynamicAppendsNames
                 ];
-                $requestedColumns = array_diff($list, $x);
+                $requestedColumns = array_diff($list, $nonColumnFields);
             }
 
             
