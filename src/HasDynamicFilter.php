@@ -42,10 +42,10 @@ trait HasDynamicFilter{
             if($request->has($key)){
                 $clause = $clauses[$key] ?? $defaultClause;
                 $op = $operators[$key] ?? null;
-                // logs()->alert($op);
                 if(count($ops) && !in_array($op, $ops)){
                     $op = $ops[0] ?? '=';
                 }
+                $op ??= '='; // if null
 
                 $not = str_starts_with($op, '!');
                 $operator = str_replace('!', '', $op);
@@ -70,7 +70,7 @@ trait HasDynamicFilter{
 
 
     public function applyDynamicFilter(Builder $q, string $key, string $operator, $value, string $logic = 'and', bool $not = false, string $clause = 'where'){
-
+        // dump($key, $operator, $value, $logic, $not, $clause);
         if($this->hasNamedScope(\Str::camel($key))){ 
             $this->callNamedScope(\Str::camel($key), [$q, $value, $operator, $logic, $not, $clause]);
             return;
@@ -118,7 +118,7 @@ trait HasDynamicFilter{
             'json_contains_key' => $q->whereJsonContainsKey($key, $logic, $not),
             'json_overlaps' => $q->whereJsonOverlaps($key, $value, $logic, $not),
             'json_length' => $q->havingJsonLength($key, '=', $value, $logic),
-            'has' => $this->has($key, $not ? '<' : '>=', 1, $logic),
+            'has' => $q->has($key, $not ? '<' : '>=', 1, $logic),
         };
     }
 
