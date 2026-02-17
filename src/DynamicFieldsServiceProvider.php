@@ -15,9 +15,15 @@ class DynamicFieldsServiceProvider extends ServiceProvider
 {
     public function boot()
     {
+        $this->mergeConfigFrom(__DIR__.'/config.php', 'dynamic-query');
+        $this->publishes([
+            __DIR__.'/config.php' => config_path('dynamic-query.php'),
+        ], 'dynamic-query-config');
+
         // Getting dynamic model from morph map.
         EloquentBuilder::macro('dynamicModel', function(?string $default = null, array $whitelist = []){
-            $type = request()->input('_model', $default);
+            $pModel = config('dynamic-query.params.model', '_model');
+            $type = request()->input($pModel, $default);
             if(!$type){
                 throw new HttpResponseException(response('morph alias required', 400));
             }
@@ -47,16 +53,19 @@ class DynamicFieldsServiceProvider extends ServiceProvider
         //  Pagination Marco
         $macro = function (?int $maxPerPage = null, bool $allowGet = true, $columns = ['*'], $pageName = 'page', $page = null, $total = null) {
             $request = request();
+            $pGetAll = config('dynamic-query.params.get_all', '_get_all');
+            $pLimit = config('dynamic-query.params.limit', '_limit');
+
             /** @var \Illuminate\Database\Eloquent\Builder $this  */
-            if($allowGet && $request->boolean('_get_all', false)){
-                if($limit = $request->integer('_limit', 0)){
+            if($allowGet && $request->boolean($pGetAll, false)){
+                if($limit = $request->integer($pLimit, 0)){
                     $this->limit($limit);
                 }
                 return $this->get($columns);
             }
 
-            $maxPerPage ??= 30;
-            $defaultSize = 10;
+            $maxPerPage ??= config('dynamic-query.defaults.max_per_page', 50);
+            $defaultSize = config('dynamic-query.defaults.per_page', 5);
             $size = (int) $request->integer('per_page', $defaultSize);
             if ($size <= 0) {
                 $size = $defaultSize;
@@ -72,6 +81,23 @@ class DynamicFieldsServiceProvider extends ServiceProvider
         BaseBuilder::macro('dynamicPaginate', $macro);
         BelongsToMany::macro('dynamicPaginate', $macro);
         HasManyThrough::macro('dynamicPaginate', $macro);
+
+
+        
+        // EloquentBuilder::macro('dynamicStats', function() {
+        //     // This allows calling Order::dynamicStats()
+        //     // It assumes the model uses the trait, but if it doesn't, 
+        //     // we can either throw error or manually apply logic.
+        //     // The cleanest way is to just forward the call if the model has the scope.
+            
+        //     $model = $this->getModel();
+        //     if (method_exists($model, 'scopeDynamicStats')) {
+        //         return $this->dynamicStats(); // Call the scope
+        //     }
+            
+        //     // Fallback or Exception
+        //     throw new \Exception("Model ".get_class($model)." does not use HasDynamicStats trait.");
+        // });
     }
 
 
