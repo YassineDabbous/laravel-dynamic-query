@@ -58,7 +58,7 @@ This packages is a set of 4 traits, you can add one of them or just use the gene
     use HasDynamicQuery;
 ```
 
-In your controller, call the needed scopes or just use the **dynamicQuery()** method:
+In your controller, call the needed scopes or just use the **dynamicAPI()** method:
 
 ```php
 class UserController
@@ -75,7 +75,7 @@ class UserController
         return $result;
 
         # Or just
-        return User::dynamicQuery();            # call all dynamic features at once
+        return User::dynamicAPI();            # call all dynamic features at once
     }
 }
 ```
@@ -549,5 +549,5 @@ return [
 - }
 - 
 - return $results;
-+ return Model::dynamicQuery();
++ return Model::dynamicAPI();
 ```
