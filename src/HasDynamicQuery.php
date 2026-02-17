@@ -4,11 +4,15 @@ namespace YassineDabbous\DynamicQuery;
 
 trait HasDynamicQuery{
     
-    use HasDynamicFields, HasDynamicFilter, HasDynamicSort, HasDynamicSort, HasDynamicGroup;
+    use HasDynamicFields, HasDynamicFilter, HasDynamicSort, HasDynamicSort, HasDynamicGroup, HasDynamicStats;
 
     /** One method for all scopes. */
-    public function dynamicQuery(): mixed{
-        $result = static::dynamicSelect()->dynamicFilter()->dynamicOrderBy()->dynamicGroupBy()->dynamicPaginate();
+    public function scopeDynamicQuery(): mixed{
+        return $this->dynamicSelect()->dynamicFilter()->dynamicOrderBy()->dynamicGroupBy();
+    }
+    
+    public function scopeDynamicAPI(): mixed{
+        $result = $this->dynamicSelect()->dynamicFilter()->dynamicOrderBy()->dynamicGroupBy()->dynamicPaginate();
         $result->dynamicAppend();
         return $result;
     }
