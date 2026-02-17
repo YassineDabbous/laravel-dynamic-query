@@ -21,6 +21,17 @@ trait HasDynamicFields{
         return [];
     }
 
+    /**
+     * Columns that must always be selected for the model to function correctly.
+     * These are force-included in every dynamic query.
+     *
+     * Example:
+     *   return ['id', 'owner_id', 'status'];
+     */
+    public function requiredColumns(): array
+    {
+        return ['id'];
+    }
 
     /**
      * Accessable Model Relations with their dependencies.
@@ -147,6 +158,7 @@ trait HasDynamicFields{
 
         if(!in_array('*', $list)){
             $selectableColumns = $this->dynamicColumns();
+            $requiredColumns = $this->requiredColumns();
 
             if(count($selectableColumns)){
                  // This prevents trying to select relation names like "children" as columns.
@@ -160,9 +172,10 @@ trait HasDynamicFields{
                 $requestedColumns = array_diff($list, $nonColumnFields);
             }
 
+            $finalColumns = array_unique(array_merge($requiredColumns, $requestedColumns));
             
-            if(count($requestedColumns)){
-                 $q->select(array_unique($requestedColumns));
+            if(count($finalColumns)){
+                 $q->select(array_unique($finalColumns));
             }
         }
 
