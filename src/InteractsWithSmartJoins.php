@@ -3,6 +3,8 @@
 namespace YassineDabbous\DynamicQuery;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOneOrMany;
 
 trait InteractsWithSmartJoins
 {
@@ -11,6 +13,9 @@ trait InteractsWithSmartJoins
     /**
      * Joins a relation if it hasn't been joined already.
      * Supports dot notation: 'posts.comments'
+     * 
+     * @param Builder $query
+     * @param string $relationName
      */
     protected function dynamicJoinRelation(Builder $query, string $relationName)
     {
@@ -30,7 +35,7 @@ trait InteractsWithSmartJoins
         
         // Only handle BelongsTo and HasOne/Many for BI Joins roughly
         // Morph relations are too complex for auto-joining in this context usually
-        if ($relation instanceof \Illuminate\Database\Eloquent\Relations\BelongsTo) {
+        if (is_a($relation, BelongsTo::class)) {
             $relatedTable = $relation->getRelated()->getTable();
             $fk = $relation->getForeignKeyName();
             $ownerKey = $relation->getOwnerKeyName();
@@ -38,7 +43,7 @@ trait InteractsWithSmartJoins
             
             $query->leftJoin($relatedTable, "$localTable.$fk", '=', "$relatedTable.$ownerKey");
         } 
-        elseif ($relation instanceof \Illuminate\Database\Eloquent\Relations\HasOneOrMany) {
+        elseif (is_a($relation, HasOneOrMany::class)) {
             $relatedTable = $relation->getRelated()->getTable();
             $fk = $relation->getForeignKeyName();
             $localKey = $relation->getLocalKeyName();
@@ -54,7 +59,12 @@ trait InteractsWithSmartJoins
     }
     
     /** 
-     * Resolve 'user.name' -> joins 'users' -> returns 'users.name' 
+     * Qualifies a column name, automatically joining any relations in dot notation.
+     * Example: Resolve 'user.name' -> joins 'users' -> returns 'users.name' 
+     * 
+     * @param Builder $query
+     * @param string $field
+     * @return string
      */
     protected function dynamicQualifyColumn(Builder $query, string $field): string
     {

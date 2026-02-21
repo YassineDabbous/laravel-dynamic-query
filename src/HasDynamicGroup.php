@@ -22,6 +22,17 @@ trait HasDynamicGroup {
         return [];
     }
 
+    /**
+     * Apply dynamic grouping and date-based group macros.
+     * Supports dot-notation for related columns and macro syntax (e.g., field:macro).
+     * 
+     * @param Builder $q
+     * @param array $allowed Whitelist of columns (defaults to dynamicGroups())
+     * @param array $default Default grouping if none requested
+     * @param array $ignore  Columns to exclude
+     * @param array $input   Optional input data (defaults to request()->all())
+     * @return Builder
+     */
     public function scopeDynamicGroupBy(Builder $q, array $allowed = [], array $default = [], array $ignore = [], array $input = []): Builder {
         $input = $this->resolveDynamicInput($input);
         $pGroup = config('dynamic-query.params.group', '_group');
@@ -74,7 +85,13 @@ trait HasDynamicGroup {
     }
 
     /**
-     * Generates DB-Specific SQL for Date grouping
+     * Generates DB-Specific SQL for Date grouping (year, month, day, hour).
+     * Handles timezone conversion and automatic alias generation.
+     * 
+     * @param Builder $q
+     * @param string $column Qualified column name
+     * @param string $macro  Macro name (year|month|day|hour)
+     * @param array  $input  Input data for timezone resolution
      */
     protected function applyDateGrouping(Builder $q, $column, $macro, array $input = [])
     {

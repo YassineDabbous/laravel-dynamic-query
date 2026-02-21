@@ -27,6 +27,22 @@ trait HasDynamicFilter {
     }
 
 
+    /**
+     * Apply dynamic filtering based on URL parameters or provided array.
+     * Supports standard operators, complex JSON/Fulltext operators, and named scopes.
+     * 
+     * Resolution order:
+     * 1. Check if key matches an allowed column (via dynamicColumns()) or relation (dot notation).
+     * 2. If not a column, try to call a named scope.
+     * 3. Apply standard or complex operator logic.
+     * 
+     * @param Builder $q
+     * @param array $operators Specific operator overrides per field
+     * @param array $allowed   Whitelist of allowed filters (defaults to dynamicFilters())
+     * @param array $ignore    Filters to exclude
+     * @param array $input     Optional input data (defaults to request()->all())
+     * @return Builder
+     */
     public function scopeDynamicFilter(Builder $q, array $operators = [], array $allowed = [], array $ignore = [], array $input = []): Builder {
         $input = $this->resolveDynamicInput($input);
 
@@ -87,6 +103,23 @@ trait HasDynamicFilter {
     }
 
 
+    /**
+     * Internal method to apply a single filter clause.
+     * Handles priority between named scopes and database columns.
+     * 
+     * Resolution order:
+     * 1. Check if key matches an allowed column (via dynamicColumns()) or relation (dot notation).
+     * 2. If not a column, try to call a named scope.
+     * 3. Apply standard or complex operator logic.
+     * 
+     * @param Builder $q
+     * @param string $key
+     * @param string $operator
+     * @param mixed $value
+     * @param string $logic 'and' or 'or'
+     * @param bool $not Whether to negate the filter
+     * @param string $clause 'where' or 'having'
+     */
     protected function applyDynamicFilter(Builder $q, string $key, string $operator, $value, string $logic = 'and', bool $not = false, string $clause = 'where'){
 
         // 1. Check if this key is a real column or dot-notation relation column

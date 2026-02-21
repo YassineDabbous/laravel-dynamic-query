@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 
 trait HasDynamicSort {
     use HasDynamicCore;
+    use InteractsWithSmartJoins;
 
     /**
      * Allowed columns for OrderBy clause.
@@ -19,7 +20,16 @@ trait HasDynamicSort {
         return [];
     }
      
-    /** Change OrderBy clause. */
+    /** 
+     * Apply dynamic sorting based on requested fields.
+     * Supports dot-notation for related columns (Smart Joins).
+     * 
+     * @param Builder $q
+     * @param array $allowed Override allowed sortable columns
+     * @param array $ignore Columns to ignore
+     * @param array $input Optional input data (defaults to request()->all())
+     * @return Builder
+     */
     public function scopeDynamicSort(Builder $q, array $allowed = [], array $ignore = [], array $input = []): Builder {
         $input = $this->resolveDynamicInput($input);
         $pSort = config('dynamic-query.params.sort', '_sort');
@@ -36,7 +46,7 @@ trait HasDynamicSort {
             $requestedSorts = [];
             foreach ($list as $value) {
                 if(str_starts_with($value, '-')){
-                    $requestedSorts[str_replace('-', '', $value)] = 'desc';
+                    $requestedSorts[ltrim($value, '-')] = 'desc';
                 } else {
                     $requestedSorts[$value] = 'asc';
                 }
@@ -45,7 +55,8 @@ trait HasDynamicSort {
             $filtered = array_intersect_key($requestedSorts, $allowedSorts);
     
             foreach ($filtered as $column => $direction) {
-                $q->orderBy($column, $direction);
+                $qualifiedColumn = $this->dynamicQualifyColumn($q, $column);
+                $q->orderBy($qualifiedColumn, $direction);
             }
         }
 

@@ -81,8 +81,8 @@ trait HasDynamicFields{
 
 
     /** Append only requests fields. */
-    public function dynamicAppend(array $fields = [], array $ignore = []): void {
-        $list = $this->parseFields($fields);
+    public function dynamicAppend(array $fields = [], array $ignore = [], array $input = []): void {
+        $list = $this->parseFields($fields, $input);
         $list = array_diff($list, $ignore);
         if(count($list)){
             $this->setVisible($list);
@@ -93,21 +93,37 @@ trait HasDynamicFields{
             }
 
             // add appends to child relations
-            foreach ($this->deepFields as $key => $deepFs) {
-                if($this->{$key} instanceof EloquentCollection){
+            foreach ($this->__dynamicQueryDeepFields as $key => $deepFs) {
+                if(is_a($this->{$key}, EloquentCollection::class)){
                     foreach ($this->{$key} as $relation) {
-                        $relation->dynamicAppend($deepFs);
+                        $relation->dynamicAppend($deepFs, [], $input);
                     }
                 } 
-                else if($this->{$key} instanceof Model){
-                    $this->{$key}?->dynamicAppend($deepFs);
+                else if(is_a($this->{$key}, Model::class)){
+                    $this->{$key}?->dynamicAppend($deepFs, [], $input);
                 }
             }
         }
     }
 
 
-    /** Select requested columns, eager load relations and call aggregates. */
+    /**
+     * Apply dynamic field selection, relation loading, and aggregates.
+     * 
+     * Resolution order:
+     * 1. Parse requested fields from URL (_fields) or $fields array.
+     * 2. Resolve append dependencies (columns needed by accessors).
+     * 3. Resolve relation dependencies (foreign keys needed for loading).
+     * 4. Eager-load relations with optional deep field filtering.
+     * 5. Apply column selection (intersection with dynamicColumns() whitelist).
+     * 6. Call aggregate scopes if requested.
+     * 
+     * @param Builder $q
+     * @param array $fields Specific field whitelist (overrides URL)
+     * @param array $ignore Fields to exclude
+     * @param array $input  Optional input data (defaults to request()->all())
+     * @return Builder
+     */
     public function scopeDynamicSelect(Builder $q, array $fields = [], array $ignore = [], array $input = []): Builder {
         $input = $this->resolveDynamicInput($input);
         $list = $this->parseFields($fields, $input);
@@ -199,7 +215,7 @@ trait HasDynamicFields{
                     }
                     continue;
                 }
-                if($value instanceof \Closure){
+                if(is_a($value, \Closure::class)){
                     $value($q);
                 }
             }
@@ -207,7 +223,14 @@ trait HasDynamicFields{
         return $q;
     }
 
-    /** Transform nested selection string to nested array. */
+    /**
+     * Transform nested selection string (id,posts:id|title) to nested associative array.
+     * Also extracts deep fields into the internal __dynamicQueryDeepFields property.
+     * 
+     * @param array $fields
+     * @param array $input
+     * @return array
+     */
     protected function parseFields(array $fields = [], array $input = []): array {
         if(count($fields)) {
             $list = $fields;

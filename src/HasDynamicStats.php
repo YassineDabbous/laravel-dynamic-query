@@ -19,7 +19,11 @@ trait HasDynamicStats
     }
 
     /**
-     * Main Entry Point
+     * Main Entry Point for dynamic statistics and metrics.
+     * Calculates values like count, sum, average, etc.
+     * 
+     * @param Builder $q
+     * @param array $input Optional input data (defaults to request()->all())
      */
     public function scopeDynamicStats(Builder $q, array $input = [])
     {
@@ -33,7 +37,7 @@ trait HasDynamicStats
         // We fetch these here to ensure the fingerprint includes all relevant params
         $hashParams = $input;
 
-        if ($enableCache && request()->isMethod('get')) {
+        if ($enableCache && request() && request()->isMethod('get')) {
             // Generate Fingerprint
             $hashParams = $input;
             ksort($hashParams);
@@ -45,14 +49,25 @@ trait HasDynamicStats
     }
 
     /**
-     * API Friendly Wrapper
+     * API Friendly Wrapper that returns a formatted statistics array.
+     * Uses StatsTransformer to build a structured response with metadata and summary.
+     * 
+     * @param Builder $q
+     * @param array $input Optional input data (defaults to request()->all())
+     * @return array
      */
     public function scopeDynamicStatsAPI(Builder $q, array $input = []): array
     {
         $rawData = $this->scopeDynamicStats($q, $input);
-        return StatsTransformer::make($rawData);
+        return StatsTransformer::make($rawData, $input);
     }
 
+    /**
+     * Internal method to run the statistics calculation pipeline.
+     * 
+     * @param Builder $q
+     * @param array $input
+     */
     protected function runStatsPipeline(Builder $q, array $input = [])
     {
 
@@ -119,15 +134,11 @@ trait HasDynamicStats
 
         // Driver-aware casting
         $driver = $q->getConnection()->getDriverName();
-        $cast = in_array($type, ['avg']) ? 'DECIMAL(10,2)' : 'SIGNED';
-        switch ($driver) {
-            case 'pgsql':
-                $cast = in_array($type, ['avg']) ? 'DECIMAL(10,2)' : 'BIGINT';
-                break;
-            case 'sqlite':
-                $cast = in_array($type, ['avg']) ? 'REAL' : 'INTEGER';
-                break;
-        }
+        $cast = match ($driver) {
+            'pgsql'  => in_array($type, ['avg']) ? 'DECIMAL(10,2)' : 'BIGINT',
+            'sqlite' => in_array($type, ['avg']) ? 'REAL' : 'INTEGER',
+            default  => in_array($type, ['avg']) ? 'DECIMAL(10,2)' : 'SIGNED',
+        };
 
         if ($type === 'count') {
             $q->selectRaw("COUNT($columnSql) as $alias");
@@ -136,6 +147,13 @@ trait HasDynamicStats
         }
     }
 
+    /**
+     * Run comparative statistics (Period-over-Period).
+     * Shifts the date window backwards by the same duration as the current range.
+     * 
+     * @param Builder $originalQuery
+     * @param array $input
+     */
     protected function runComparison(Builder $originalQuery, array $input = [])
     {
         $pCompare = config('dynamic-query.params.compare', '_compare');
