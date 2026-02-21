@@ -22,24 +22,22 @@ trait HasDynamicGroup {
         return [];
     }
 
-    public function scopeDynamicGroupBy(Builder $q, array $allowed = [], array $default = [], array $ignore = []): Builder {
-        
-        /** @var \Illuminate\Http\Request $request */
-        $request = request();
+    public function scopeDynamicGroupBy(Builder $q, array $allowed = [], array $default = [], array $ignore = [], array $input = []): Builder {
+        $input = $this->resolveDynamicInput($input);
         $pGroup = config('dynamic-query.params.group', '_group');
 
         // Parse Input
-        $input = $request->input($pGroup, []);
-        if(is_string($input)){
-            $input = explode(',', $input);
+        $requested = $input[$pGroup] ?? [];
+        if(is_string($requested)){
+            $requested = explode(',', $requested);
         }
 
         // Determine Whitelist
         $whitelist = count($allowed) ? $allowed : $this->dynamicGroups();
         
         // 1. Handle Explicit Groups
-        if(count($input)){
-            foreach ($input as $rawGroup) {
+        if(count($requested)){
+            foreach ($requested as $rawGroup) {
                 // Parse "field:macro" (e.g., created_at:month)
                 [$field, $macro] = array_pad(explode(':', $rawGroup), 2, null);
 
@@ -53,7 +51,7 @@ trait HasDynamicGroup {
 
                 if ($macro) {
                     // Date Grouping (SQL Generation)
-                    $this->applyDateGrouping($q, $qualified, $macro);
+                    $this->applyDateGrouping($q, $qualified, $macro, $input);
                 } else {
                     // Standard Grouping
                     $q->groupBy($qualified);
@@ -78,26 +76,55 @@ trait HasDynamicGroup {
     /**
      * Generates DB-Specific SQL for Date grouping
      */
-    protected function applyDateGrouping(Builder $q, $column, $macro)
+    protected function applyDateGrouping(Builder $q, $column, $macro, array $input = [])
     {
         $pTimezone = config('dynamic-query.params.timezone', '_timezone');
         $defaultTz = config('dynamic-query.defaults.timezone', 'UTC');
-        
-        $tz = request()->input($pTimezone, $defaultTz);
-        $driver = $q->getConnection()->getDriverName();
-        
-        // Alias: created_at_month
-        $alias = str_replace('.', '_', $column) . '_' . $macro;
 
-        $sql = match($driver) {
+        $tz = $this->validateTimezone($input[$pTimezone] ?? $defaultTz);
+        $macro = $this->validateMacro($macro);
+        if (!$macro) {
+            return;
+        }
+        $driver = $q->getConnection()->getDriverName();
+
+        // Alias: created_at_month
+        $alias = $this->sanitizeAlias(str_replace('.', '_', $column) . '_' . $macro);
+
+        $sql = match ($driver) {
+            'mysql'  => $this->mysqlDateSql($column, $macro, $tz),
             'pgsql'  => $this->pgDateSql($column, $macro, $tz),
-            'sqlite' => $this->sqliteDateSql($column, $macro),
-            default  => $this->mysqlDateSql($column, $macro, $tz),
+            'sqlite' => $this->sqliteDateSql($column, $macro, $tz),
+            default  => null,
         };
 
-        $q->selectRaw("$sql as $alias")
-          ->groupBy($alias)
-          ->orderBy($alias);
+        if ($sql) {
+            $q->groupByRaw($sql)->selectRaw("$sql as $alias");
+        }
+    }
+
+    protected function validateTimezone(string $tz): string
+    {
+        if (in_array($tz, \DateTimeZone::listIdentifiers(), true)) {
+            return $tz;
+        }
+
+        if (preg_match('/^[+-]\d{2}:\d{2}$/', $tz)) {
+            return $tz;
+        }
+
+        return 'UTC';
+    }
+
+    protected function validateMacro(?string $macro): ?string
+    {
+        $allowed = ['year', 'month', 'day', 'hour'];
+        return in_array($macro, $allowed, true) ? $macro : null;
+    }
+
+    protected function sanitizeAlias(string $alias): string
+    {
+        return preg_replace('/[^a-zA-Z0-9_]/', '_', $alias);
     }
 
     // --- SQL Helpers ---
@@ -105,13 +132,13 @@ trait HasDynamicGroup {
     protected function mysqlDateSql($col, $period, $tz)
     {
         $colSql = ($tz && $tz !== 'UTC') ? "CONVERT_TZ($col, '+00:00', '$tz')" : $col;
-        $format = match ($period) {
-            'year'  => '%Y',
-            'month' => '%Y-%m',
-            'day'   => '%Y-%m-%d',
-            'hour'  => '%Y-%m-%d %H:00',
-            default => '%Y-%m-%d'
-        };
+        $format = '%Y-%m-%d';
+        switch ($period) {
+            case 'year':  $format = '%Y'; break;
+            case 'month': $format = '%Y-%m'; break;
+            case 'day':   $format = '%Y-%m-%d'; break;
+            case 'hour':  $format = '%Y-%m-%d %H:00'; break;
+        }
         return "DATE_FORMAT($colSql, '$format')";
     }
 
