@@ -21,14 +21,16 @@ return [
     /** url params names */
     'params' => [
         'model'     => '_model',
-        'fields' => '_fields',
-        'logic' => '_logic',
+        'fields'    => '_fields',
+        'logic'     => '_logic',
         'operators' => '_operators',
-        'sort' => '_sort',
+        'sort'      => '_sort',
         'limit'     => '_limit',
-        'page' => 'page',
-        'per_page' => 'per_page',
-        'get_all' => '_get_all',
+        'page'      => 'page',
+        'per_page'  => 'per_page',
+        'get_all'   => '_get_all',
+        'clause'    => '_clause',
+        'clauses'   => '_clauses',
         
         // Stats Params
         'metric' => '_metric',
@@ -37,8 +39,10 @@ return [
         'compare' => '_compare',     // previous_period
         'compare_on' => '_compare_on', 
         'timezone' => '_timezone',   // Asia/Tokyo
+        'simple' => '_simple',       // true/false for simplePaginate
     ],
 
+    // Reserved for future use:
     'filter' => [],
 
     'fields' => [
@@ -50,15 +54,13 @@ return [
         | Fields parsing format.
         |--------------------------------------------------------------------------
         |
-        | Available Formats:
+        | Available Formats (Planned for future):
         |      - null      => Default format    (eg: "id,name,posts:id|title,created_at")
         |      - yaml      => Inline yaml       (eg: "- id\n- name\n- posts:\n    - id\n    - title")
         |      - json      => inline json       (eg: ["id", "name", { "posts": ["id", "title"] }])
         |
         */
-
         'format' => null,
-
     ],
 
 ];
