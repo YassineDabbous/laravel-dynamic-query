@@ -7,18 +7,18 @@ use Illuminate\Support\Str;
 
 class StatsTransformer
 {
-    protected $request;
+    protected $input;
     protected $data;
     
-    public function __construct($data)
+    public function __construct($data, array $input = [])
     {
-        $this->request = request();
+        $this->input = !empty($input) ? $input : (request() ? request()->all() : []);
         $this->data = $data;
     }
 
-    public static function make($data): array
+    public static function make($data, array $input = []): array
     {
-        return (new static($data))->resolve();
+        return (new static($data, $input))->resolve();
     }
 
     public function resolve(): array
@@ -26,10 +26,9 @@ class StatsTransformer
         // 1. Normalize Data (Handle Compare Mode vs Standard Mode)
         $isComparison = isset($this->data['current']) && isset($this->data['previous']);
         
-        $current = $isComparison ? collect($this->data['current']) : collect($this->data);
-        $previous = $isComparison ? collect($this->data['previous']) : collect([]);
+        $current = $isComparison ? Collection::make($this->data['current']) : Collection::make($this->data);
+        $previous = $isComparison ? Collection::make($this->data['previous']) : Collection::make([]);
         
-        // $summaryOverride = $isComparison ? ($this->data['summary'] ?? []) : null;
         $summaryOverride = null;
         if ($isComparison && !empty($this->data['summary'])) {
             $summaryOverride = $this->data['summary'];
@@ -57,7 +56,8 @@ class StatsTransformer
     {
         // Determine grouping keys to match previous data with current
         // If _group=status,created_at:month, keys are status, created_at_month
-        $groupParams = $this->request->input(config('dynamic-query.params.group', '_group'));
+        $pGroup = config('dynamic-query.params.group', '_group');
+        $groupParams = $this->input[$pGroup] ?? null;
         $groupKeys = [];
         
         if ($groupParams) {
@@ -111,11 +111,12 @@ class StatsTransformer
 
     protected function calculateSummary(array $dataset): array
     {
-        $total = collect($dataset)->sum('value');
+        $total = Collection::make($dataset)->sum('value');
         
         // Check if we are doing an Average metric, summing it is wrong.
         // But for generic API, Sum is the safest default summary unless stated otherwise.
-        $metric = $this->request->input(config('dynamic-query.params.metric', '_metric'));
+        $pMetric = config('dynamic-query.params.metric', '_metric');
+        $metric = $this->input[$pMetric] ?? 'count';
         if (Str::startsWith($metric, 'avg')) {
             $total = count($dataset) ? $total / count($dataset) : 0;
         }
@@ -128,11 +129,15 @@ class StatsTransformer
 
     protected function buildMeta(): array
     {
+        $pMetric    = config('dynamic-query.params.metric', '_metric');
+        $pTimezone  = config('dynamic-query.params.timezone', '_timezone');
+        $pGroup     = config('dynamic-query.params.group', '_group');
+
         return [
-            'metric' => $this->request->input(config('dynamic-query.params.metric', '_metric'), 'count'),
+            'metric' => $this->input[$pMetric] ?? 'count',
             'currency' => config('app.currency', 'USD'), // Or from request
-            'timezone' => $this->request->input(config('dynamic-query.params.timezone', '_timezone'), 'UTC'),
-            'granularity' => $this->request->input(config('dynamic-query.params.group', '_group')),
+            'timezone' => $this->input[$pTimezone] ?? 'UTC',
+            'granularity' => $this->input[$pGroup] ?? null,
         ];
     }
 }
