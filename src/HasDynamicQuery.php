@@ -2,17 +2,34 @@
 
 namespace YassineDabbous\DynamicQuery;
 
+use Illuminate\Database\Eloquent\Builder;
+
 trait HasDynamicQuery{
     
-    use HasDynamicFields, HasDynamicFilter, HasDynamicSort, HasDynamicSort, HasDynamicGroup, HasDynamicStats;
+    use HasDynamicFields, HasDynamicFilter, HasDynamicSort, HasDynamicGroup, HasDynamicStats;
 
     /** One method for all scopes. */
-    public function scopeDynamicQuery(): mixed{
-        return $this->dynamicSelect()->dynamicFilter()->dynamicOrderBy()->dynamicGroupBy();
+    /**
+     * Apply all dynamic features (Select, Filter, Sort, Group) at once.
+     * 
+     * @param Builder $q
+     * @param array $input Optional input data (defaults to request()->all())
+     * @return mixed
+     */
+    public function scopeDynamicQuery(Builder $q, array $input = []): mixed{
+        return $q->dynamicSelect([], [], $input)->dynamicFilter([], [], [], $input)->dynamicSort([], [], $input)->dynamicGroupBy([], [], [], $input);
     }
     
-    public function scopeDynamicAPI(): mixed{
-        $result = $this->dynamicSelect()->dynamicFilter()->dynamicOrderBy()->dynamicGroupBy()->dynamicPaginate();
+    /**
+     * API Friendly Wrapper: applies all dynamic features, paginates, 
+     * and appends results in a single call.
+     * 
+     * @param Builder $q
+     * @param array $input Optional input data (defaults to request()->all())
+     * @return mixed
+     */
+    public function scopeDynamicAPI(Builder $q, array $input = []): mixed{
+        $result = $q->dynamicSelect([], [], $input)->dynamicFilter([], [], [], $input)->dynamicSort([], [], $input)->dynamicGroupBy([], [], [], $input)->dynamicPaginate([], $input);
         $result->dynamicAppend();
         return $result;
     }
