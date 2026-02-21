@@ -5,6 +5,8 @@ return [
     'defaults' => [
         'per_page'      => 15,
         'max_per_page'  => 100,
+        'allow_get_all' => false,
+        'max_get_all'   => 1000,
         'cache_ttl'     => 600, // 10 minutes for stats
         'timezone'      => 'UTC',
     ],
