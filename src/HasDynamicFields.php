@@ -5,13 +5,14 @@ namespace YassineDabbous\DynamicQuery;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 trait HasDynamicFields{
 
     use HasDynamicCore;
     use RelationsFinder;
 
-    protected $deepFields = [];
+    protected $__dynamicQueryDeepFields = [];
 
 
     /**
@@ -80,7 +81,7 @@ trait HasDynamicFields{
 
 
     /** Append only requests fields. */
-    public function dynamicAppend(array $fields = [], array $ignore = []) {
+    public function dynamicAppend(array $fields = [], array $ignore = []): void {
         $list = $this->parseFields($fields);
         $list = array_diff($list, $ignore);
         if(count($list)){
@@ -107,8 +108,9 @@ trait HasDynamicFields{
 
 
     /** Select requested columns, eager load relations and call aggregates. */
-    public function scopeDynamicSelect(Builder $q, array $fields = [], array $ignore = []): Builder {
-        $list = $this->parseFields($fields);
+    public function scopeDynamicSelect(Builder $q, array $fields = [], array $ignore = [], array $input = []): Builder {
+        $input = $this->resolveDynamicInput($input);
+        $list = $this->parseFields($fields, $input);
         $list = array_diff($list, $ignore);
         if(count($list)==0){
             return $q;
@@ -138,15 +140,15 @@ trait HasDynamicFields{
         if(count($requestedRelations)){
             $uniqueRelations = array_unique($requestedRelations);
             foreach ($uniqueRelations as $relationName) {
-                if(array_key_exists($relationName, $this->deepFields)) {
+                if(array_key_exists($relationName, $this->__dynamicQueryDeepFields)) {
                     // Get the foreign key(s) for the current relationship.
                     $relationDependencies = (array) ($dynamicRelations[$relationName] ?? []);
                     // Get the fields the user requested for this deep relation.
-                    $deepFields = $this->deepFields[$relationName];
+                    $deepFields = $this->__dynamicQueryDeepFields[$relationName];
                     
                     $fieldsForRelation = array_unique(array_merge($deepFields, $relationDependencies));
 
-                    $q->with($relationName, fn($rq) => $rq->dynamicSelect($fieldsForRelation));
+                    $q->with($relationName, fn($rq) => $rq->dynamicSelect($fieldsForRelation, [], $input));
                 } else {
                     $q->with($relationName);
                 }
@@ -184,16 +186,16 @@ trait HasDynamicFields{
         if(count($dynamicAggregatesNames)){
             $requestedAggregates = array_intersect($dynamicAggregatesNames, $list);
             foreach ($requestedAggregates as $key) {
-                $value = $this->dynamicAggregates()[$key];
+                $value = $dynamicAggregates[$key];
                 if(is_null($value)){
-                    if($this->hasNamedScope(\Str::camel($key))){ 
-                        $this->callNamedScope(\Str::camel($key), [$q]);
+                    if($this->hasNamedScope(Str::camel($key))){ 
+                        $this->callNamedScope(Str::camel($key), [$q]);
                     }
                     continue;
                 }
                 if(is_string($value)){
-                    if($this->hasNamedScope(\Str::camel($value))){ 
-                        $this->callNamedScope(\Str::camel($value), [$q]);
+                    if($this->hasNamedScope(Str::camel($value))){ 
+                        $this->callNamedScope(Str::camel($value), [$q]);
                     }
                     continue;
                 }
@@ -202,30 +204,35 @@ trait HasDynamicFields{
                 }
             }
         }
-
         return $q;
     }
 
-    
-
-    public function parseFields(array $fields = []): array {
-        $fields = count($fields) ? $fields : request()->input('_fields', []);
-        if (is_string($fields)) {
-            $fields = explode(',', $fields);
+    /** Transform nested selection string to nested array. */
+    protected function parseFields(array $fields = [], array $input = []): array {
+        if(count($fields)) {
+            $list = $fields;
+        } else {
+            $pFields = config('dynamic-query.params.fields', '_fields');
+            $requested = $input[$pFields] ?? [];
+            $list = is_array($requested) ? $requested : explode(',', $requested);
         }
-        if(count($fields)==0){
-            return [];
-        }
 
-        $list = [];
-        foreach($fields as $f){
-            $r = explode(':', $f);
-            $list[] = $r[0];
-            if(count($r) == 2){
-                $this->deepFields[$r[0]] = explode('|', $r[1]);
+        $list = array_filter(array_map('trim', $list));
+
+        $res = [];
+        $this->__dynamicQueryDeepFields = []; // Reset deep fields for this parsing
+
+        foreach($list as $field){
+            if(str_contains($field, ':')){
+                [$relation, $subFields] = explode(':', $field);
+                $res[$relation] = null; // Mark relation as requested
+                $this->__dynamicQueryDeepFields[$relation] = explode('|', $subFields);
+            } else {
+                $res[] = $field;
             }
         }
-        return $list;
+        
+        return $this->normalizeAssociativeArray($res);
     }
  
 }
