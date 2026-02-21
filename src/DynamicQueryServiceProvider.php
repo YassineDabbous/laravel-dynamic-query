@@ -26,15 +26,17 @@ class DynamicQueryServiceProvider extends ServiceProvider
          * 
          * @param string|null $default Default alias if none provided
          * @param array $whitelist Allowed aliases
+         * @param array $input Optional input data
          */
-        EloquentBuilder::macro('dynamicModel', function(?string $default = null, array $whitelist = []){
+        EloquentBuilder::macro('dynamicModel', function(?string $default = null, array $whitelist = [], array $input = []){
             if (empty($whitelist) && $default === null) {
                 throw new HttpResponseException(
                     response('dynamicModel requires either a $default or a $whitelist', 500)
                 );
             }
+            $input = !empty($input) ? $input : request()->all();
             $pModel = config('dynamic-query.params.model', '_model');
-            $type = request()->input($pModel, $default);
+            $type = $input[$pModel] ?? $default;
             if(!$type){
                 throw new HttpResponseException(response('morph alias required', 400));
             }
@@ -50,9 +52,9 @@ class DynamicQueryServiceProvider extends ServiceProvider
 
 
         // Dynamic model appends
-        $macro = function (array $fields = [], array $ignore = []) {
+        $macro = function (array $fields = [], array $ignore = [], array $input = []) {
             foreach ($this as $model) {
-                $model->dynamicAppend($fields, $ignore);
+                $model->dynamicAppend($fields, $ignore, $input);
             }
         };
 

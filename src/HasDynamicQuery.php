@@ -30,7 +30,7 @@ trait HasDynamicQuery{
      */
     public function scopeDynamicAPI(Builder $q, array $input = []): mixed{
         $result = $q->dynamicSelect([], [], $input)->dynamicFilter([], [], [], $input)->dynamicSort([], [], $input)->dynamicGroupBy([], [], [], $input)->dynamicPaginate([], $input);
-        $result->dynamicAppend();
+        $result->dynamicAppend([], [], $input);
         return $result;
     }
 }
