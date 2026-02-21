@@ -21,9 +21,9 @@ trait HasDynamicStats
     /**
      * Main Entry Point
      */
-    public function scopeDynamicStats(Builder $q)
+    public function scopeDynamicStats(Builder $q, array $input = [])
     {
-        $request = request();
+        $input = $this->resolveDynamicInput($input);
 
         // Config: Settings
         $enableCache = config('dynamic-query.settings.enable_stats_cache', true);
@@ -31,30 +31,30 @@ trait HasDynamicStats
 
         // Config: Params
         // We fetch these here to ensure the fingerprint includes all relevant params
-        $params = $request->all();
+        $hashParams = $input;
 
-        if ($enableCache && $request->isMethod('get')) {
+        if ($enableCache && request()->isMethod('get')) {
             // Generate Fingerprint
-            ksort($params);
-            $hash = 'stats:' . $this->getTable() . ':' . md5(json_encode($params));
-            return Cache::remember($hash, $cacheTtl, fn() => $this->runStatsPipeline($q));
+            $hashParams = $input;
+            ksort($hashParams);
+            $hash = 'stats:' . $this->getTable() . ':' . md5(json_encode($hashParams));
+            return Cache::remember($hash, $cacheTtl, fn() => $this->runStatsPipeline($q, $input));
         }
 
-        return $this->runStatsPipeline($q);
+        return $this->runStatsPipeline($q, $input);
     }
 
     /**
      * API Friendly Wrapper
      */
-    public function scopeDynamicStatsAPI(Builder $q): array
+    public function scopeDynamicStatsAPI(Builder $q, array $input = []): array
     {
-        $rawData = $this->scopeDynamicStats($q);
+        $rawData = $this->scopeDynamicStats($q, $input);
         return StatsTransformer::make($rawData);
     }
 
-    protected function runStatsPipeline(Builder $q)
+    protected function runStatsPipeline(Builder $q, array $input = [])
     {
-        $request = request();
 
         // Config: Params
         $pCompare = config('dynamic-query.params.compare', '_compare');
@@ -62,26 +62,26 @@ trait HasDynamicStats
         $pTransform = config('dynamic-query.params.transform', '_transform');
 
         // 1. Compare Mode (Period-over-Period)
-        if ($request->input($pCompare) === 'previous_period') {
-            return $this->runComparison($q);
+        if (($input[$pCompare] ?? null) === 'previous_period') {
+            return $this->runComparison($q, $input);
         }
 
         // 2. Apply Grouping (Delegated to HasDynamicGroup)
         // This handles Smart Joins, Date Macros, and Selects
-        $q->dynamicGroupBy();
+        $q->dynamicGroupBy([], [], [], $input);
 
         // 3. Apply Filters (Delegated to HasDynamicFilter)
-        $q->dynamicFilter();
+        $q->dynamicFilter([], [], [], $input);
 
         // 4. Select Metric
         $metricAlias = 'value';
-        $this->applyStatsMetric($q, $request->input($pMetric, 'count'), $metricAlias);
+        $this->applyStatsMetric($q, $input[$pMetric] ?? 'count', $metricAlias);
 
         // 5. Execute
         $data = $q->get();
 
         // 6. Post-Transform
-        if ($transform = $request->input($pTransform)) {
+        if ($transform = ($input[$pTransform] ?? null)) {
             $data = $this->transformStats($data, $transform, $metricAlias);
         }
 
@@ -92,9 +92,13 @@ trait HasDynamicStats
     {
         [$type, $field] = array_pad(explode(':', $input), 2, null);
 
+        // Sanitize alias to prevent SQL injection
+        $alias = preg_replace('/[^a-zA-Z0-9_]/', '_', $alias);
+
         // A. Custom Metrics
-        if (isset($this->dynamicMetrics()[$type])) {
-            return $q->selectRaw("({$this->dynamicMetrics()[$type]}) as $alias");
+        $metrics = $this->dynamicMetrics();
+        if (isset($metrics[$type])) {
+            return $q->selectRaw("({$metrics[$type]}) as $alias");
         }
 
         // B. Standard Aggregates
@@ -103,11 +107,27 @@ trait HasDynamicStats
             $type = 'count';
         }
 
-        // Qualify column (e.g. 'total' -> 'orders.total')
-        $columnSql = $field ? $this->dynamicQualifyColumn($q, $field) : '*';
+        // Validate that $field is a known column
+        $columnSql = '*';
+        if ($field) {
+            $allowedColumns = method_exists($this, 'dynamicColumns') ? $this->dynamicColumns() : [];
+            if (!empty($allowedColumns) && !in_array($field, $allowedColumns)) {
+                $field = null; // Fall back to COUNT(*)
+            }
+            $columnSql = $field ? $this->dynamicQualifyColumn($q, $field) : '*';
+        }
 
-        // Casting for clean JSON output
+        // Driver-aware casting
+        $driver = $q->getConnection()->getDriverName();
         $cast = in_array($type, ['avg']) ? 'DECIMAL(10,2)' : 'SIGNED';
+        switch ($driver) {
+            case 'pgsql':
+                $cast = in_array($type, ['avg']) ? 'DECIMAL(10,2)' : 'BIGINT';
+                break;
+            case 'sqlite':
+                $cast = in_array($type, ['avg']) ? 'REAL' : 'INTEGER';
+                break;
+        }
 
         if ($type === 'count') {
             $q->selectRaw("COUNT($columnSql) as $alias");
@@ -116,25 +136,25 @@ trait HasDynamicStats
         }
     }
 
-    protected function runComparison(Builder $originalQuery)
+    protected function runComparison(Builder $originalQuery, array $input = [])
     {
-        $request = request();
         $pCompare = config('dynamic-query.params.compare', '_compare');
         $pCompareOn = config('dynamic-query.params.compare_on', '_compare_on');
 
         // 1. Determine which Date Column controls the period
-        $dateCol = $request->input($pCompareOn, 'created_at');
+        $dateCol = $input[$pCompareOn] ?? 'created_at';
 
         // 2. Validate that we actually have a Date Range to shift
         // The comparison logic REQUIRES a range (Array of 2 dates) in the request input.
-        $dateRange = $request->input($dateCol);
+        $dateRange = $input[$dateCol] ?? null;
 
         if (!is_array($dateRange) || count($dateRange) !== 2) {
             // If no valid range is provided, we cannot calculate the "Previous" period.
             // Return only current data to prevent crashing.
-            request()->merge([$pCompare => null]);
+            $errorInput = $input;
+            $errorInput[$pCompare] = null;
             return [
-                'current' => $this->runStatsPipeline($originalQuery->clone()),
+                'current' => $this->runStatsPipeline($originalQuery->clone(), $errorInput),
                 'previous' => [],
                 'summary' => null,
                 'error' => "Comparison requires a date range filter on '$dateCol'."
@@ -142,9 +162,9 @@ trait HasDynamicStats
         }
 
         // 3. Run Current Period
-        $currentQuery = $originalQuery->clone();
-        request()->merge([$pCompare => null]);
-        $currentData = $this->runStatsPipeline($currentQuery);
+        $currentInput = $input;
+        $currentInput[$pCompare] = null;
+        $currentData = $this->runStatsPipeline($originalQuery->clone(), $currentInput);
 
         // 4. Calculate Previous Dates
         try {
@@ -159,21 +179,11 @@ trait HasDynamicStats
             $prevEnd = $end->copy()->subDays($days);
 
             // 5. Run Previous Period Query
-            // Temporarily override the request input for the date column
-            request()->merge([
-                $dateCol => [$prevStart->toDateTimeString(), $prevEnd->toDateTimeString()]
-            ]);
+            $prevInput = $input;
+            $prevInput[$dateCol] = [$prevStart->toDateTimeString(), $prevEnd->toDateTimeString()];
+            $prevInput[$pCompare] = null;
 
-            $previousQuery = $originalQuery->clone();
-
-            // Note: In real app, cleaner to pass $request object explicitly to runStatsPipeline
-            $previousData = $this->runStatsPipeline($previousQuery);
-
-            // 6. Restore Request State (Cleanup)
-            request()->merge([
-                $dateCol => $dateRange,
-                $pCompare => 'previous_period'
-            ]);
+            $previousData = $this->runStatsPipeline($originalQuery->clone(), $prevInput);
 
             return [
                 'current' => $currentData,
@@ -182,8 +192,6 @@ trait HasDynamicStats
             ];
 
         } catch (\Exception $e) {
-            // Restore request if date parsing fails
-            request()->merge([$dateCol => $dateRange, $pCompare => 'previous_period']);
             throw $e;
         }
     }
