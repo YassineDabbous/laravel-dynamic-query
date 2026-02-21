@@ -19,22 +19,22 @@ trait HasDynamicSort {
         return [];
     }
      
+    /** Change OrderBy clause. */
+    public function scopeDynamicSort(Builder $q, array $allowed = [], array $ignore = [], array $input = []): Builder {
+        $input = $this->resolveDynamicInput($input);
+        $pSort = config('dynamic-query.params.sort', '_sort');
+        $requested = $input[$pSort] ?? [];
+        $list = is_array($requested) ? $requested : explode(',', $requested);
+        $list = array_filter(array_map('trim', $list));
 
-
-    public function scopeDynamicOrderBy(Builder $q, array $allowed = [], array $default = [], array $ignore = []): Builder {
-
-        $input = request()->input('_sort', []);
-
-        if(is_string($input)){
-            $input = explode(',', $input);
-        }
-
-        if(count($input)){
+        if(count($list)){
             $allSorts = count($allowed) ? $allowed : $this->dynamicSorts();
             $allowedSorts = array_filter($allSorts, fn($k) => !in_array($k, $ignore));
+            $allowedSorts = $this->normalizeAssociativeArray($allowedSorts);
+            $allowedNames = array_keys($allowedSorts);
 
             $requestedSorts = [];
-            foreach ($input as $value) {
+            foreach ($list as $value) {
                 if(str_starts_with($value, '-')){
                     $requestedSorts[str_replace('-', '', $value)] = 'desc';
                 } else {
@@ -42,20 +42,32 @@ trait HasDynamicSort {
                 }
             }
     
-            $filtered = array_intersect_key($requestedSorts, $this->toAssociative($allowedSorts));
+            $filtered = array_intersect_key($requestedSorts, $allowedSorts);
     
             foreach ($filtered as $column => $direction) {
                 $q->orderBy($column, $direction);
-            }
-        } else if(count($default)){
-            $sorts = $this->toAssociative($default);
-            foreach ($sorts as $column => $direction) {
-                $q->orderBy($column, $direction == 'desc' ? 'desc' : 'asc'); 
             }
         }
 
         return $q;
     }
 
- 
+    /** @deprecated Use scopeDynamicSort instead. */
+    public function scopeDynamicOrderBy(Builder $q, array $allowed = [], array $default = [], array $ignore = [], array $input = []): Builder {
+        // If default sorts are provided, apply them first if no sort is requested
+        $input = $this->resolveDynamicInput($input);
+        $pSort = config('dynamic-query.params.sort', '_sort');
+        $requested = $input[$pSort] ?? [];
+        $list = is_array($requested) ? $requested : explode(',', $requested);
+        $list = array_filter(array_map('trim', $list));
+
+        if (empty($list) && count($default)) {
+            $sorts = $this->toAssociative($default);
+            foreach ($sorts as $column => $direction) {
+                $q->orderBy($column, $direction == 'desc' ? 'desc' : 'asc'); 
+            }
+        }
+        
+        return $this->scopeDynamicSort($q, $allowed, $ignore, $input);
+    }
 }
