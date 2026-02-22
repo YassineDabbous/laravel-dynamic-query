@@ -41,7 +41,7 @@ trait HasDatePresets
      */
     protected function applyDateScope(Builder $query, string $column, mixed $value, ?string $operator, string $logic, bool $not): Builder
     {
-        // 1. Handle Semantic Presets (Strings)
+        // Handle Semantic Presets (Strings)
         if (is_string($value)) {
             $now = Carbon::now(config('app.timezone', 'UTC'));
 
@@ -64,7 +64,7 @@ trait HasDatePresets
             }
         }
 
-        // 2. Fallback: Apply Standard Logic
+        // Fallback: Apply Standard Logic
         if (is_array($value) && count($value) === 2) {
              return $query->whereBetween($column, $value, $logic, $not);
         }

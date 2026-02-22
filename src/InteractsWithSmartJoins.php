@@ -17,18 +17,19 @@ trait InteractsWithSmartJoins
      * @param Builder $query
      * @param string $relationName
      */
-    protected function dynamicJoinRelation(Builder $query, string $relationName)
+    protected function dynamicJoinRelation(Builder $query, string $relationName): void
     {
+        // Check method exists FIRST (before getRelationTableName which calls it)
+        if (!method_exists($this, $relationName)) {
+            return;
+        }
+
         // Prevent duplicate joins
         $joins = $query->getQuery()->joins ?? [];
         foreach ($joins as $join) {
             if ($join->table === $this->getRelationTableName($relationName)) {
                 return; 
             }
-        }
-
-        if (!method_exists($this, $relationName)) {
-            return;
         }
 
         $relation = $this->{$relationName}();
@@ -53,9 +54,16 @@ trait InteractsWithSmartJoins
         }
     }
 
-    protected function getRelationTableName($relationName)
+    protected function getRelationTableName(string $relationName): ?string
     {
-        return $this->{$relationName}()->getRelated()->getTable();
+        try {
+            $relation = $this->{$relationName}();
+            if ($relation instanceof \Illuminate\Database\Eloquent\Relations\Relation) {
+                return $relation->getRelated()->getTable();
+            }
+        } catch (\Throwable $e) {}
+        
+        return null;
     }
     
     /** 
@@ -78,7 +86,9 @@ trait InteractsWithSmartJoins
         if (method_exists($this, $relation)) {
             $this->dynamicJoinRelation($query, $relation);
             $tableName = $this->getRelationTableName($relation);
-            return "{$tableName}.{$column}";
+            if ($tableName) {
+                return "{$tableName}.{$column}";
+            }
         }
 
         return $field;

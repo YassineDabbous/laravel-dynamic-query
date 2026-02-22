@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 
 trait HasDynamicQuery{
     
-    use HasDynamicFields, HasDynamicFilter, HasDynamicSort, HasDynamicGroup, HasDynamicStats;
+    use HasDynamicFields, HasDynamicFilter, HasDynamicSort, HasDynamicGroup, HasDynamicStats, Helpers\HasDatePresets;
 
     /** One method for all scopes. */
     /**
@@ -16,7 +16,7 @@ trait HasDynamicQuery{
      * @param array $input Optional input data (defaults to request()->all())
      * @return mixed
      */
-    public function scopeDynamicQuery(Builder $q, array $input = []): mixed{
+    public function scopeDynamicQuery(Builder $q, array $input = []): Builder{
         return $q->dynamicSelect([], [], $input)->dynamicFilter([], [], [], $input)->dynamicSort([], [], $input)->dynamicGroupBy([], [], [], $input);
     }
     
@@ -29,8 +29,16 @@ trait HasDynamicQuery{
      * @return mixed
      */
     public function scopeDynamicAPI(Builder $q, array $input = []): mixed{
-        $result = $q->dynamicSelect([], [], $input)->dynamicFilter([], [], [], $input)->dynamicSort([], [], $input)->dynamicGroupBy([], [], [], $input)->dynamicPaginate([], $input);
-        $result->dynamicAppend([], [], $input);
+        $result = $q->dynamicSelect([], [], $input)
+                    ->dynamicFilter([], [], [], $input)
+                    ->dynamicSort([], [], $input)
+                    ->dynamicGroupBy([], [], [], $input)
+                    ->dynamicPaginate([], $input);
+        
+        if (method_exists($result, 'dynamicAppend')) {
+            $result->dynamicAppend([], [], $input);
+        }
+        
         return $result;
     }
 }

@@ -5,12 +5,19 @@ namespace YassineDabbous\DynamicQuery;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Collection;
 
 trait HasDynamicStats
 {
+    use HasDynamicCore;
+    use InteractsWithSmartJoins;
 
     /**
      * Define custom SQL metrics (Category B - Ratios/SQL).
+     * 
+     * ⚠️ SECURITY: Values are injected as raw SQL via selectRaw().
+     * NEVER construct these strings from user input.
+     * 
      * Example: 'aov' => 'SUM(total_amount) / COUNT(id)'
      */
     public function dynamicMetrics(): array
@@ -24,8 +31,9 @@ trait HasDynamicStats
      * 
      * @param Builder $q
      * @param array $input Optional input data (defaults to request()->all())
+     * @return array|Collection
      */
-    public function scopeDynamicStats(Builder $q, array $input = [])
+    public function scopeDynamicStats(Builder $q, array $input = []): array|Collection
     {
         $input = $this->resolveDynamicInput($input);
 
@@ -35,13 +43,14 @@ trait HasDynamicStats
 
         // Config: Params
         // We fetch these here to ensure the fingerprint includes all relevant params
-        $hashParams = $input;
 
-        if ($enableCache && request() && request()->isMethod('get')) {
-            // Generate Fingerprint
-            $hashParams = $input;
-            ksort($hashParams);
-            $hash = 'stats:' . $this->getTable() . ':' . md5(json_encode($hashParams));
+        if ($enableCache && !empty($input)) {
+            // Generate Fingerprint (including builder state for security)
+            $hash = 'stats:' . $this->getTable() . ':' . md5(json_encode([
+                'input' => $input,
+                'sql' => $q->toSql(),
+                'bindings' => $q->getBindings(),
+            ]));
             return Cache::remember($hash, $cacheTtl, fn() => $this->runStatsPipeline($q, $input));
         }
 
@@ -68,7 +77,7 @@ trait HasDynamicStats
      * @param Builder $q
      * @param array $input
      */
-    protected function runStatsPipeline(Builder $q, array $input = [])
+    protected function runStatsPipeline(Builder $q, array $input = []): array|Collection
     {
 
         // Config: Params
@@ -76,26 +85,24 @@ trait HasDynamicStats
         $pMetric = config('dynamic-query.params.metric', '_metric');
         $pTransform = config('dynamic-query.params.transform', '_transform');
 
-        // 1. Compare Mode (Period-over-Period)
+        // Compare Mode (Period-over-Period)
         if (($input[$pCompare] ?? null) === 'previous_period') {
             return $this->runComparison($q, $input);
         }
 
-        // 2. Apply Grouping (Delegated to HasDynamicGroup)
+        // Apply Grouping (Delegated to HasDynamicGroup)
         // This handles Smart Joins, Date Macros, and Selects
         $q->dynamicGroupBy([], [], [], $input);
 
-        // 3. Apply Filters (Delegated to HasDynamicFilter)
+        // Apply Filters (Delegated to HasDynamicFilter)
         $q->dynamicFilter([], [], [], $input);
 
-        // 4. Select Metric
+        // Select Metric
         $metricAlias = 'value';
-        $this->applyStatsMetric($q, $input[$pMetric] ?? 'count', $metricAlias);
+        $this->applyStatsMetric($q, $input[$pMetric] ?? 'count', $input, $metricAlias);
 
-        // 5. Execute
         $data = $q->get();
 
-        // 6. Post-Transform
         if ($transform = ($input[$pTransform] ?? null)) {
             $data = $this->transformStats($data, $transform, $metricAlias);
         }
@@ -103,17 +110,18 @@ trait HasDynamicStats
         return $data;
     }
 
-    protected function applyStatsMetric(Builder $q, $input, $alias)
+    protected function applyStatsMetric(Builder $q, string $metric, array $input, ?string $alias = null): void
     {
-        [$type, $field] = array_pad(explode(':', $input), 2, null);
+        [$type, $field] = array_pad(explode(':', $metric), 2, null);
 
         // Sanitize alias to prevent SQL injection
-        $alias = preg_replace('/[^a-zA-Z0-9_]/', '_', $alias);
+        $alias = $this->sanitizeAlias($alias ?? ($field ? "{$type}_{$field}" : $type));
 
         // A. Custom Metrics
         $metrics = $this->dynamicMetrics();
         if (isset($metrics[$type])) {
-            return $q->selectRaw("({$metrics[$type]}) as $alias");
+            $q->selectRaw("({$metrics[$type]}) as $alias");
+            return;
         }
 
         // B. Standard Aggregates
@@ -127,7 +135,7 @@ trait HasDynamicStats
         if ($field) {
             $allowedColumns = method_exists($this, 'dynamicColumns') ? $this->dynamicColumns() : [];
             if (!empty($allowedColumns) && !in_array($field, $allowedColumns)) {
-                $field = null; // Fall back to COUNT(*)
+                $field = $q->getModel()->getKeyName(); 
             }
             $columnSql = $field ? $this->dynamicQualifyColumn($q, $field) : '*';
         }
@@ -147,28 +155,21 @@ trait HasDynamicStats
         }
     }
 
-    /**
-     * Run comparative statistics (Period-over-Period).
-     * Shifts the date window backwards by the same duration as the current range.
-     * 
-     * @param Builder $originalQuery
-     * @param array $input
-     */
-    protected function runComparison(Builder $originalQuery, array $input = [])
+    protected function runComparison(Builder $originalQuery, array $input = []): array
     {
         $pCompare = config('dynamic-query.params.compare', '_compare');
         $pCompareOn = config('dynamic-query.params.compare_on', '_compare_on');
 
-        // 1. Determine which Date Column controls the period
         $dateCol = $input[$pCompareOn] ?? 'created_at';
+        $allowedCols = method_exists($this, 'dynamicColumns') ? $this->dynamicColumns() : [];
+        if (!empty($allowedCols) && !in_array($dateCol, $allowedCols)) {
+            $dateCol = 'created_at';
+        }
 
-        // 2. Validate that we actually have a Date Range to shift
-        // The comparison logic REQUIRES a range (Array of 2 dates) in the request input.
+        // Validate that we actually have a Date Range to shift
         $dateRange = $input[$dateCol] ?? null;
 
         if (!is_array($dateRange) || count($dateRange) !== 2) {
-            // If no valid range is provided, we cannot calculate the "Previous" period.
-            // Return only current data to prevent crashing.
             $errorInput = $input;
             $errorInput[$pCompare] = null;
             return [
@@ -179,42 +180,37 @@ trait HasDynamicStats
             ];
         }
 
-        // 3. Run Current Period
+        // Run Current Period
         $currentInput = $input;
         $currentInput[$pCompare] = null;
         $currentData = $this->runStatsPipeline($originalQuery->clone(), $currentInput);
 
-        // 4. Calculate Previous Dates
-        try {
-            $start = Carbon::parse($dateRange[0]);
-            $end = Carbon::parse($dateRange[1]);
+        // Calculate Previous Dates
+        $start = Carbon::parse($dateRange[0]);
+        $end = Carbon::parse($dateRange[1]);
 
-            // Calculate duration in days (inclusive)
-            $days = $start->diffInDays($end) + 1;
+        // Calculate duration in days (inclusive)
+        $days = $start->diffInDays($end) + 1;
 
-            // Shift window backwards
-            $prevStart = $start->copy()->subDays($days);
-            $prevEnd = $end->copy()->subDays($days);
+        // Shift window backwards
+        $prevStart = $start->copy()->subDays($days);
+        $prevEnd = $end->copy()->subDays($days);
 
-            // 5. Run Previous Period Query
-            $prevInput = $input;
-            $prevInput[$dateCol] = [$prevStart->toDateTimeString(), $prevEnd->toDateTimeString()];
-            $prevInput[$pCompare] = null;
+        // Run Previous Period Query
+        $prevInput = $input;
+        $prevInput[$dateCol] = [$prevStart->toDateTimeString(), $prevEnd->toDateTimeString()];
+        $prevInput[$pCompare] = null;
 
-            $previousData = $this->runStatsPipeline($originalQuery->clone(), $prevInput);
+        $previousData = $this->runStatsPipeline($originalQuery->clone(), $prevInput);
 
-            return [
-                'current' => $currentData,
-                'previous' => $previousData,
-                'summary' => $this->calculateSummaryDelta($currentData, $previousData)
-            ];
-
-        } catch (\Exception $e) {
-            throw $e;
-        }
+        return [
+            'current' => $currentData,
+            'previous' => $previousData,
+            'summary' => $this->calculateSummaryDelta($currentData, $previousData)
+        ];
     }
 
-    protected function transformStats($collection, $transform, $valueKey)
+    protected function transformStats(mixed $collection, string $transform, string $valueKey): mixed
     {
         if ($transform === 'cumulative') {
             $runningTotal = 0;
@@ -226,11 +222,17 @@ trait HasDynamicStats
         }
 
         if ($transform === 'growth') {
+            $isFirst = true;
             $prev = 0;
-            return $collection->map(function ($item) use (&$prev, $valueKey) {
+            return $collection->map(function ($item) use (&$prev, &$isFirst, $valueKey) {
                 $curr = $item->$valueKey;
-                $diff = ($prev == 0) ? 0 : (($curr - $prev) / abs($prev)) * 100;
-                $item->growth_percentage = round($diff, 2);
+                if ($isFirst) {
+                    $item->growth_percentage = null; // No previous data to compare
+                    $isFirst = false;
+                } else {
+                    $diff = ($prev == 0) ? 0 : (($curr - $prev) / abs($prev)) * 100;
+                    $item->growth_percentage = round($diff, 2);
+                }
                 $prev = $curr;
                 return $item;
             });
@@ -239,20 +241,20 @@ trait HasDynamicStats
         return $collection;
     }
 
-    protected function calculateSummaryDelta($current, $previous)
+    protected function calculateSummaryDelta(array|Collection $current, array|Collection $previous): ?array
     {
-        // Simple scalar delta logic
-        // If the result is a Collection (grouped), this is harder to generalize,
-        // so we return null or generic structure.
-        if (count($current) == 1 && isset($current[0]->value) && count($previous) == 1) {
-            $currVal = $current[0]->value;
-            $prevVal = $previous[0]->value ?? 0;
+        $currentSum = collect($current)->sum('value');
+        $prevSum = collect($previous)->sum('value');
+        
+        $delta = $currentSum - $prevSum;
+        $percent = $prevSum != 0 ? ($delta / $prevSum) * 100 : ($currentSum > 0 ? 100 : 0);
 
-            return [
-                'absolute' => $currVal - $prevVal,
-                'percent' => $prevVal > 0 ? round((($currVal - $prevVal) / $prevVal) * 100, 2) : 0
-            ];
-        }
-        return null;
+        return [
+            'value' => $currentSum,
+            'previous_value' => $prevSum,
+            'delta' => $delta,
+            'percent' => round($percent, 2),
+            'formatted' => (string) round($currentSum, 2),
+        ];
     }
 }

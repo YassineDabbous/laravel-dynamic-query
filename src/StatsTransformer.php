@@ -7,24 +7,24 @@ use Illuminate\Support\Str;
 
 class StatsTransformer
 {
-    protected $input;
-    protected $data;
+    protected array $input;
+    protected mixed $data;
     
-    public function __construct($data, array $input = [])
+    public function __construct(mixed $data, array $input = [])
     {
-        $this->input = !empty($input) ? $input : (request() ? request()->all() : []);
+        $this->input = $input;
         $this->data = $data;
     }
 
-    public static function make($data, array $input = []): array
+    public static function make(mixed $data, array $input = []): array
     {
         return (new static($data, $input))->resolve();
     }
 
     public function resolve(): array
     {
-        // 1. Normalize Data (Handle Compare Mode vs Standard Mode)
-        $isComparison = isset($this->data['current']) && isset($this->data['previous']);
+        // Normalize Data (Handle Compare Mode vs Standard Mode)
+        $isComparison = is_array($this->data) && isset($this->data['current']) && isset($this->data['previous']);
         
         $current = $isComparison ? Collection::make($this->data['current']) : Collection::make($this->data);
         $previous = $isComparison ? Collection::make($this->data['previous']) : Collection::make([]);
@@ -34,10 +34,10 @@ class StatsTransformer
             $summaryOverride = $this->data['summary'];
         }
 
-        // 2. Build Dataset
+        // Build Dataset
         $dataset = $this->buildDataset($current, $previous);
 
-        // 3. Calculate Summary (if not provided by delta logic)
+        // Calculate Summary (if not provided by delta logic)
         $summary = $summaryOverride ?? $this->calculateSummary($dataset);
         
         // Defensive check: If calculateSummary somehow returns empty, force null
@@ -55,7 +55,6 @@ class StatsTransformer
     protected function buildDataset(Collection $current, Collection $previous): array
     {
         // Determine grouping keys to match previous data with current
-        // If _group=status,created_at:month, keys are status, created_at_month
         $pGroup = config('dynamic-query.params.group', '_group');
         $groupParams = $this->input[$pGroup] ?? null;
         $groupKeys = [];
@@ -78,6 +77,7 @@ class StatsTransformer
             $prevItem = null;
             if ($previous->isNotEmpty() && !empty($groupKeys)) {
                 $prevItem = $previous->first(function ($p) use ($item, $groupKeys) {
+                    $p = (object) $p;
                     foreach ($groupKeys as $key) {
                         if (($p->$key ?? null) != ($item->$key ?? null)) return false;
                     }
@@ -103,7 +103,7 @@ class StatsTransformer
                 'label' => empty($labelParts) ? 'Total' : implode(' - ', $labelParts),
                 'group' => (object) $groups, // Cast to object for JSON {}
                 'value' => (float) $value,
-                'previous_value' => $prevItem ? (float) ($prevItem->value ?? 0) : null,
+                'previous_value' => $prevItem ? (float) (($prevItem->value ?? 0)) : null,
                 'transforms' => (object) $transforms,
             ];
         })->values()->toArray();
@@ -112,18 +112,20 @@ class StatsTransformer
     protected function calculateSummary(array $dataset): array
     {
         $total = Collection::make($dataset)->sum('value');
-        
-        // Check if we are doing an Average metric, summing it is wrong.
-        // But for generic API, Sum is the safest default summary unless stated otherwise.
+        $count = count($dataset);
+
         $pMetric = config('dynamic-query.params.metric', '_metric');
         $metric = $this->input[$pMetric] ?? 'count';
+
+        // For avg metrics: report the straight group-level average (unweighted).
         if (Str::startsWith($metric, 'avg')) {
-            $total = count($dataset) ? $total / count($dataset) : 0;
+            $total = $count > 0 ? $total / $count : 0;
         }
 
         return [
-            'value' => $total,
-            'formatted' => (string) round($total, 2), // Can add currency formatting logic here later
+            'value' => (float) $total,
+            'formatted' => (string) round($total, 2),
+            'type' => Str::startsWith($metric, 'avg') ? 'unweighted_avg' : 'total',
         ];
     }
 
@@ -135,7 +137,7 @@ class StatsTransformer
 
         return [
             'metric' => $this->input[$pMetric] ?? 'count',
-            'currency' => config('app.currency', 'USD'), // Or from request
+            'currency' => config('dynamic-query.defaults.currency', config('app.currency', 'USD')),
             'timezone' => $this->input[$pTimezone] ?? 'UTC',
             'granularity' => $this->input[$pGroup] ?? null,
         ];
