@@ -30,12 +30,22 @@ trait HasDynamicSort {
      * @param array $input Optional input data (defaults to request()->all())
      * @return Builder
      */
-    public function scopeDynamicSort(Builder $q, array $allowed = [], array $ignore = [], array $input = []): Builder {
+    public function scopeDynamicSort(
+        Builder $q,
+        array $allowed = [],
+        array $default = [],
+        array $ignore = [],
+        array $input = []
+    ): Builder {
         $input = $this->resolveDynamicInput($input);
         $pSort = config('dynamic-query.params.sort', '_sort');
         $requested = $input[$pSort] ?? [];
         $list = is_array($requested) ? $requested : explode(',', $requested);
         $list = array_filter(array_map('trim', $list));
+
+        if (empty($list) && !empty($default)) {
+            $list = is_array($default) ? $default : [$default];
+        }
 
         if(count($list)){
             $allSorts = count($allowed) ? $allowed : $this->dynamicSorts();
@@ -63,22 +73,16 @@ trait HasDynamicSort {
         return $q;
     }
 
-    /** @deprecated Use scopeDynamicSort instead. */
-    public function scopeDynamicOrderBy(Builder $q, array $allowed = [], array $default = [], array $ignore = [], array $input = []): Builder {
-        // If default sorts are provided, apply them first if no sort is requested
-        $input = $this->resolveDynamicInput($input);
-        $pSort = config('dynamic-query.params.sort', '_sort');
-        $requested = $input[$pSort] ?? [];
-        $list = is_array($requested) ? $requested : explode(',', $requested);
-        $list = array_filter(array_map('trim', $list));
-
-        if (empty($list) && count($default)) {
-            $sorts = $this->toAssociative($default);
-            foreach ($sorts as $column => $direction) {
-                $q->orderBy($column, $direction == 'desc' ? 'desc' : 'asc'); 
-            }
-        }
-        
-        return $this->scopeDynamicSort($q, $allowed, $ignore, $input);
+    /**
+     * @deprecated Use scopeDynamicSort() instead.
+     */
+    public function scopeDynamicOrderBy(
+        Builder $q,
+        array $allowed = [],
+        array $default = [],
+        array $ignore = [],
+        array $input = []
+    ): Builder {
+        return $this->scopeDynamicSort($q, $allowed, $default, $ignore, $input);
     }
 }
