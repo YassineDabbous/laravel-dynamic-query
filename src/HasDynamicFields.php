@@ -31,7 +31,7 @@ trait HasDynamicFields{
      */
     public function requiredColumns(): array
     {
-        return ['id'];
+        return [$this->getKeyName()];
     }
 
     /**
@@ -44,21 +44,27 @@ trait HasDynamicFields{
      *     ];
      */
     public function dynamicRelations(): array{
-        return $this->guessDynamicRelations();
+        if (config('dynamic-query.settings.relation_guess', true)) {
+            return $this->guessDynamicRelations();
+        }
+        return [];
     }
 
 
     /**
-     * All visible appends with their dependencies.
+     * Whitelisted appends. Returns [] by default for security.
+     * 
      * Example:
      *   return [
      *        'status_name'     => 'status',                            // "status_name" depends on 'status' relation
      *        'full_name'       => ['first_name', 'last_name'],         // "full_name" depends on 'first_name' and 'last_name' columns
      *        'custom_key',                                             // "custom_key" doesn't has dependencies
      *   ];
+     * 
+     * @return array
      */
     public function dynamicAppends(): array{
-        return $this->getMutatedAttributes();
+        return [];
     }
 
 
@@ -82,18 +88,27 @@ trait HasDynamicFields{
 
     /** Append only requests fields. */
     public function dynamicAppend(array $fields = [], array $ignore = [], array $input = []): void {
-        $list = $this->parseFields($fields, $input);
+        $parsed = $this->parseFields($fields, $input);
+        $list = array_keys($parsed['fields']);
         $list = array_diff($list, $ignore);
+
         if(count($list)){
-            $this->setVisible($list);
+            // MERGE with existing visible (set by scopeDynamicSelect) instead of overwriting
+            $existing = $this->getVisible();
+            if (!empty($existing)) {
+                $this->setVisible(array_unique(array_merge($existing, $list)));
+            } else {
+                $this->setVisible($list);
+            }
+
             $dynamicAppends = $this->toAssociative($this->dynamicAppends());
             $columns = array_intersect(array_keys($dynamicAppends), $list);
             if(count($columns)){
-                $this->setAppends($columns);
+                $this->appends = array_unique(array_merge($this->appends, $columns));
             }
 
             // add appends to child relations
-            foreach ($this->__dynamicQueryDeepFields as $key => $deepFs) {
+            foreach ($parsed['deepFields'] as $key => $deepFs) {
                 if(is_a($this->{$key}, EloquentCollection::class)){
                     foreach ($this->{$key} as $relation) {
                         $relation->dynamicAppend($deepFs, [], $input);
@@ -126,10 +141,16 @@ trait HasDynamicFields{
      */
     public function scopeDynamicSelect(Builder $q, array $fields = [], array $ignore = [], array $input = []): Builder {
         $input = $this->resolveDynamicInput($input);
-        $list = $this->parseFields($fields, $input);
-        $list = array_diff($list, $ignore);
+        $parsed = $this->parseFields($fields, $input);
+        $list = array_diff(array_keys($parsed['fields']), $ignore);
+        $this->__dynamicQueryDeepFields = $parsed['deepFields'];
+        
         if(count($list)==0){
             return $q;
+        }
+
+        if (config('dynamic-query.settings.clean_response', true)) {
+             $this->setVisible($list);
         }
         
         $dynamicAppends = $this->toAssociative($this->dynamicAppends());
@@ -225,11 +246,11 @@ trait HasDynamicFields{
 
     /**
      * Transform nested selection string (id,posts:id|title) to nested associative array.
-     * Also extracts deep fields into the internal __dynamicQueryDeepFields property.
+     * Also extracts deep fields.
      * 
      * @param array $fields
      * @param array $input
-     * @return array
+     * @return array{fields: array, deepFields: array}
      */
     protected function parseFields(array $fields = [], array $input = []): array {
         if(count($fields)) {
@@ -243,19 +264,22 @@ trait HasDynamicFields{
         $list = array_filter(array_map('trim', $list));
 
         $res = [];
-        $this->__dynamicQueryDeepFields = []; // Reset deep fields for this parsing
+        $deepFields = [];
 
         foreach($list as $field){
             if(str_contains($field, ':')){
                 [$relation, $subFields] = explode(':', $field);
                 $res[$relation] = null; // Mark relation as requested
-                $this->__dynamicQueryDeepFields[$relation] = explode('|', $subFields);
+                $deepFields[$relation] = explode('|', $subFields);
             } else {
                 $res[] = $field;
             }
         }
         
-        return $this->normalizeAssociativeArray($res);
+        return [
+            'fields' => $this->normalizeAssociativeArray($res),
+            'deepFields' => $deepFields,
+        ];
     }
  
 }
