@@ -11,4 +11,6 @@ interface DynamicQueryable
     public function dynamicFilters(): array;
     public function dynamicSorts(): array;
     public function dynamicGroups(): array;
+    public function dynamicMetrics(): array;
+    public function requiredColumns(): array;
 }
