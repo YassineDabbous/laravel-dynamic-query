@@ -9,13 +9,21 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder as BaseBuilder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Pagination\AbstractPaginator;
 use Illuminate\Support\ServiceProvider;
 
 class DynamicQueryServiceProvider extends ServiceProvider
 {
-    public function boot()
+    public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/config.php', 'dynamic-query');
+    }
+
+    /**
+     * Bootstrap the application services.
+     */
+    public function boot(): void
+    {
         $this->publishes([
             __DIR__.'/config.php' => config_path('dynamic-query.php'),
         ], 'dynamic-query-config');
@@ -28,7 +36,7 @@ class DynamicQueryServiceProvider extends ServiceProvider
          * @param array $whitelist Allowed aliases
          * @param array $input Optional input data
          */
-        EloquentBuilder::macro('dynamicModel', function(?string $default = null, array $whitelist = [], array $input = []){
+        EloquentBuilder::macro('resolveDynamicModel', function(?string $default = null, array $whitelist = [], array $input = []){
             if (empty($whitelist) && $default === null) {
                 throw new HttpResponseException(
                     response('dynamicModel requires either a $default or a $whitelist', 500)
@@ -47,18 +55,26 @@ class DynamicQueryServiceProvider extends ServiceProvider
             if(!$class){
                 throw new HttpResponseException(response('unknown morph alias', 400));
             }
-            return new $class;
+            return (new $class)->newQuery();
+        });
+
+        /** @deprecated Use resolveDynamicModel instead. */
+        EloquentBuilder::macro('dynamicModel', function(?string $default = null, array $whitelist = [], array $input = []){
+            return $this->resolveDynamicModel($default, $whitelist, $input);
         });
 
 
         // Dynamic model appends
         $macro = function (array $fields = [], array $ignore = [], array $input = []) {
             foreach ($this as $model) {
-                $model->dynamicAppend($fields, $ignore, $input);
+                if (method_exists($model, 'dynamicAppend')) {
+                    $model->dynamicAppend($fields, $ignore, $input);
+                }
             }
         };
 
         Collection::macro('dynamicAppend', $macro);
+        AbstractPaginator::macro('dynamicAppend', $macro);
 
 
         /**
@@ -68,10 +84,17 @@ class DynamicQueryServiceProvider extends ServiceProvider
          * @param array $input Optional input data
          * @param bool|null $allowGet Enable/disable _get_all programmatic control
          */
-        $macro = function (?int $maxPerPage = null, array $input = [], ?bool $allowGet = null, $columns = ['*'], $pageName = 'page', $page = null, $total = null) {
+        $macro = function (?int $maxPerPage = null, array $input = [], ?bool $allowGet = null, $columns = ['*'], $pageName = null, $page = null, $total = null) {
             $input = !empty($input) ? $input : request()->all();
             $pGetAll = config('dynamic-query.params.get_all', '_get_all');
             $pLimit = config('dynamic-query.params.limit', '_limit');
+            $pPerPage = config('dynamic-query.params.per_page', 'per_page');
+            
+            // NOTE: 'page' parameter name is controlled by Laravel's Paginator::$pageName.
+            // We only use our config for $pageName when explicitly set in the request.
+            $pPage = config('dynamic-query.params.page', 'page');
+            
+            $pageName ??= $pPage;
 
             $allowGet ??= config('dynamic-query.defaults.allow_get_all', false);
 
@@ -89,8 +112,8 @@ class DynamicQueryServiceProvider extends ServiceProvider
             }
 
             $maxPerPage ??= config('dynamic-query.defaults.max_per_page', 50);
-            $defaultSize = config('dynamic-query.defaults.per_page', 5);
-            $size = (int) ($input['per_page'] ?? $defaultSize);
+            $defaultSize = config('dynamic-query.defaults.per_page', 15);
+            $size = (int) ($input[$pPerPage] ?? $defaultSize);
             if ($size <= 0) {
                 $size = $defaultSize;
             }
@@ -98,8 +121,14 @@ class DynamicQueryServiceProvider extends ServiceProvider
                 $size = $maxPerPage;
             }
 
-            $currentPage = (int) ($input[$pageName] ?? 0);
-            return $currentPage == 1 ? $this->paginate($size, $columns, $pageName, $page, $total) : $this->simplePaginate($size, $columns, $pageName, $page);
+            $pSimple = config('dynamic-query.params.simple', '_simple');
+            $isSimple = filter_var($input[$pSimple] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+            if ($isSimple) {
+                return $this->simplePaginate($size, $columns, $pageName, $page);
+            }
+
+            return $this->paginate($size, $columns, $pageName, $page, $total);
         };
 
         EloquentBuilder::macro('dynamicPaginate', $macro);
