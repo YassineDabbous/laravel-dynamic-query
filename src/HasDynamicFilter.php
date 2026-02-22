@@ -58,9 +58,20 @@ trait HasDynamicFilter {
         $operators = count($operators) ? $this->normalizeAssociativeArray($operators) : ($input[$pOperators] ?? []);
         $clausesInput = $input[$pClauses] ?? [];
 
+        // Validate Operators Early
+        if (is_array($operators)) {
+            $validOps = $this->allValidOperators();
+            $operators = array_filter($operators, fn($op) => in_array($op, $validOps));
+        }
+
         // Prepare Filters List
         $filters = $this->normalizeAssociativeArray(count($allowed) ? $allowed : $this->dynamicFilters());
         $filters = array_filter($filters, fn($k) => !in_array($k, $ignore), ARRAY_FILTER_USE_KEY);
+
+        // Strict Filtering: If enabled, only allow columns present in $filters
+        if (config('dynamic-query.settings.strict_filtering', true) && empty($allowed)) {
+             $input = array_intersect_key($input, $filters);
+        }
 
         foreach ($filters as $key => $ops) {
             if (isset($input[$key])) {
@@ -81,14 +92,18 @@ trait HasDynamicFilter {
                 $operator = str_replace('!', '', $op);
                 
                 if(str_contains($operator, '%')){
-                    $operator = str_replace('%', '', $operator);
+                    $normOp = str_replace('!', '', $op);
+                    $operator = str_replace('%', '', $normOp);
                     $processedValue = $value;
-                    switch ($op) {
+                    switch ($normOp) {
                         case '%like':
                             $processedValue = "%$value";
                             break;
                         case 'like%':
                             $processedValue = "$value%";
+                            break;
+                        case '%like%':
+                            $processedValue = "%$value%";
                             break;
                     }
                 } else {
@@ -100,6 +115,28 @@ trait HasDynamicFilter {
         }
 
         return $q;
+    }
+
+    protected function allValidOperators(): array
+    {
+        return [
+            // Standard
+            '=', '<', '>', '<=', '>=', '<>', '!=', '<=>',
+            '&', '|', '^', '<<', '>>', '&~', 'is', 'is not',
+            'like', 'like binary', 'not like', 'ilike',
+            'rlike', 'not rlike', 'regexp', 'not regexp',
+            // Wildcards (with ! prefix variants)
+            '%like', 'like%', '%like%',
+            '!%like', '!like%', '!%like%',
+            '!like', '!=',
+            // Complex
+            'full_text', 'in', 'between', 'null',
+            'json_contains', 'json_contains_key', 'json_overlaps', 'json_length',
+            'has',
+            // Negated complex
+            '!in', '!between', '!null', '!has',
+            '!json_contains', '!json_contains_key', '!json_overlaps',
+        ];
     }
 
 
@@ -120,13 +157,14 @@ trait HasDynamicFilter {
      * @param bool $not Whether to negate the filter
      * @param string $clause 'where' or 'having'
      */
-    protected function applyDynamicFilter(Builder $q, string $key, string $operator, $value, string $logic = 'and', bool $not = false, string $clause = 'where'){
+    protected function applyDynamicFilter(Builder $q, string $key, string $operator, mixed $value, string $logic = 'and', bool $not = false, string $clause = 'where'): void
+    {
 
-        // 1. Check if this key is a real column or dot-notation relation column
+        // Check if this key is a real column or dot-notation relation column
         $isColumn = in_array($key, $this->dynamicColumns())
                     || str_contains($key, '.');
 
-        // 2. If it's NOT a column, try Named Scopes
+        // If it's NOT a column, try Named Scopes
         if (!$isColumn && $this->hasNamedScope(Str::camel($key))) {
             $this->callNamedScope(Str::camel($key), [$q, $value, $operator, $logic, $not, $clause]);
             return;
@@ -142,7 +180,7 @@ trait HasDynamicFilter {
         $standardOperators = [
             '=', '<', '>', '<=', '>=', '<>', '!=', '<=>',
             '&', '|', '^', '<<', '>>', '&~', 'is', 'is not',
-            'like', '!like', '%like', 'like%',
+            'like', '!like', '%like', 'like%', '%like%',
             'like binary', 'not like', 'ilike',
             'rlike', 'not rlike', 'regexp', 'not regexp',
         ];
@@ -152,12 +190,16 @@ trait HasDynamicFilter {
         if($clause === 'having'){
             $qualifiedKey = $key; // having usually uses alias or raw column
             if(in_array($operator, $standardOperators)){
-                $q->having($qualifiedKey, $operator, $value, $logic);
+                if ($not) {
+                    $q->havingRaw("NOT ($qualifiedKey $operator ?)", [$value], $logic);
+                } else {
+                    $q->having($qualifiedKey, $operator, $value, $logic);
+                }
                 return;
             }
             match ($operator) {
-                'in' => $q->having($qualifiedKey, $operator, $value, $logic),
-                'between' => $q->whereBetween($qualifiedKey, $value, $logic, $not),
+                'in' => $q->havingRaw(($not ? 'NOT ' : '') . "$qualifiedKey IN (" . implode(',', array_fill(0, count((array)$value), '?')) . ")", (array) $value, $logic),
+                'between' => $q->havingBetween($qualifiedKey, (array) $value, $logic, $not),
                 'null' => $q->havingNull($qualifiedKey, $logic, $not),
                 default => $q->having($qualifiedKey, '=', $value, $logic),
             };
@@ -167,6 +209,12 @@ trait HasDynamicFilter {
         
         // apply WHERE clause
         if(in_array($operator, $standardOperators)){
+            // Edge case: if value is an array and operator is '=', treat as 'in'
+            if (is_array($value) && $operator === '=') {
+                $q->whereIn($qualifiedKey, $value, $logic, $not);
+                return;
+            }
+
             if (is_string($value) && in_array(strtolower($value), ['true', 'false', '1', '0'], true)) {
                 $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
             }
@@ -180,15 +228,23 @@ trait HasDynamicFilter {
         
         // Complex operators
         match ($operator) {
-            'full_text' => $q->whereFullText($qualifiedKey, $value, [], $logic),
+            'full_text' => $not 
+                ? $q->whereNot(fn($query) => $query->whereFullText($qualifiedKey, $value), $logic)
+                : $q->whereFullText($qualifiedKey, $value, [], $logic),
             'in' => $q->whereIn($qualifiedKey, $value, $logic, $not),
             'between' => $q->whereBetween($qualifiedKey, $value, $logic, $not),
             'null' => $q->whereNull($qualifiedKey, $logic, $not),
             'json_contains' => $q->whereJsonContains($qualifiedKey, $value, $logic, $not),
             'json_contains_key' => $q->whereJsonContainsKey($qualifiedKey, $logic, $not),
             'json_overlaps' => $q->whereJsonOverlaps($qualifiedKey, $value, $logic, $not),
-            'json_length' => $q->havingJsonLength($qualifiedKey, '=', $value, $logic),
-            'has' => $q->has($qualifiedKey, $not ? '<' : '>=', 1, $logic),
+            'json_length' => $not
+                ? $q->whereNot(fn($query) => $query->whereJsonLength($qualifiedKey, $operator === 'json_length' ? '=' : $operator, $value), $logic)
+                : $q->whereJsonLength($qualifiedKey, $operator === 'json_length' ? '=' : $operator, $value, $logic),
+            'has' => (function() use ($q, $qualifiedKey, $not, $logic) {
+                // Strip qualification for relation names (products.comments -> comments)
+                $relation = str_contains($qualifiedKey, '.') ? last(explode('.', $qualifiedKey)) : $qualifiedKey;
+                return $q->has($relation, $not ? '<' : '>=', 1, $logic);
+            })(),
             default => null,
         };
     }
