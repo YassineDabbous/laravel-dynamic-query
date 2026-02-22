@@ -74,9 +74,14 @@ trait RelationsFinder
     }
 
     
-    protected function guessRelationColumns(ReflectionMethod $method) 
+    protected function guessRelationColumns(ReflectionMethod $method): string|array|null
     {
-        $relation = $method->invoke($this);
+        try {
+            $relation = $method->invoke($this);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
         return match (true) {
             is_a($relation, MorphOne::class) =>  $relation->getLocalKeyName(),
             is_a($relation, MorphMany::class) => $relation->getLocalKeyName(),

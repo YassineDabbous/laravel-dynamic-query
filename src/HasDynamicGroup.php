@@ -46,7 +46,7 @@ trait HasDynamicGroup {
         // Determine Whitelist
         $whitelist = count($allowed) ? $allowed : $this->dynamicGroups();
         
-        // 1. Handle Explicit Groups
+        // Handle Explicit Groups
         if(count($requested)){
             foreach ($requested as $rawGroup) {
                 // Parse "field:macro" (e.g., created_at:month)
@@ -73,9 +73,13 @@ trait HasDynamicGroup {
                 }
             }
         } 
-        // 2. Handle Defaults
+        // Handle Defaults
         else if(count($default)){
             foreach ($default as $group) {
+                // Validate defaults against whitelist if whitelist is defined
+                if (!empty($whitelist) && !in_array($group, $whitelist)) {
+                    continue;
+                }
                 $qualified = $this->dynamicQualifyColumn($q, $group);
                 $q->groupBy($qualified);
             }
@@ -93,7 +97,7 @@ trait HasDynamicGroup {
      * @param string $macro  Macro name (year|month|day|hour)
      * @param array  $input  Input data for timezone resolution
      */
-    protected function applyDateGrouping(Builder $q, $column, $macro, array $input = [])
+    protected function applyDateGrouping(Builder $q, string $column, string $macro, array $input = []): void
     {
         $pTimezone = config('dynamic-query.params.timezone', '_timezone');
         $defaultTz = config('dynamic-query.defaults.timezone', 'UTC');
@@ -106,17 +110,23 @@ trait HasDynamicGroup {
         $driver = $q->getConnection()->getDriverName();
 
         // Alias: created_at_month
-        $alias = $this->sanitizeAlias(str_replace('.', '_', $column) . '_' . $macro);
+        $alias = $this->sanitizeAlias($column . '_' . $macro);
 
-        $sql = match ($driver) {
+        $sqlData = match ($driver) {
             'mysql'  => $this->mysqlDateSql($column, $macro, $tz),
             'pgsql'  => $this->pgDateSql($column, $macro, $tz),
-            'sqlite' => $this->sqliteDateSql($column, $macro, $tz),
+            'sqlite' => $this->sqliteDateSql($column, $macro),
             default  => null,
         };
 
-        if ($sql) {
-            $q->groupByRaw($sql)->selectRaw("$sql as $alias");
+        if ($sqlData) {
+            [$sql, $bindings] = is_array($sqlData) ? $sqlData : [$sqlData, []];
+            
+            // NOTE: $bindings is intentionally passed to BOTH calls.
+            // Each raw expression has its own '?' placeholder that needs the same $tz value.
+            // If you add more '?' to the SQL template, duplicate bindings accordingly.
+            $q->groupByRaw($sql, $bindings);
+            $q->selectRaw("$sql as $alias", $bindings);
         }
     }
 
@@ -139,16 +149,19 @@ trait HasDynamicGroup {
         return in_array($macro, $allowed, true) ? $macro : null;
     }
 
-    protected function sanitizeAlias(string $alias): string
-    {
-        return preg_replace('/[^a-zA-Z0-9_]/', '_', $alias);
-    }
 
     // --- SQL Helpers ---
 
-    protected function mysqlDateSql($col, $period, $tz)
+    protected function mysqlDateSql(string $col, string $period, string $tz): array
     {
-        $colSql = ($tz && $tz !== 'UTC') ? "CONVERT_TZ($col, '+00:00', '$tz')" : $col;
+        $bindings = [];
+        if ($tz && $tz !== 'UTC') {
+            $colSql = "CONVERT_TZ($col, '+00:00', ?)";
+            $bindings[] = $tz;
+        } else {
+            $colSql = $col;
+        }
+
         $format = '%Y-%m-%d';
         switch ($period) {
             case 'year':  $format = '%Y'; break;
@@ -156,12 +169,20 @@ trait HasDynamicGroup {
             case 'day':   $format = '%Y-%m-%d'; break;
             case 'hour':  $format = '%Y-%m-%d %H:00'; break;
         }
-        return "DATE_FORMAT($colSql, '$format')";
+        
+        return ["DATE_FORMAT($colSql, '$format')", $bindings];
     }
 
-    protected function pgDateSql($col, $period, $tz)
+    protected function pgDateSql(string $col, string $period, string $tz): array
     {
-        $colSql = ($tz && $tz !== 'UTC') ? "($col at time zone 'UTC' at time zone '$tz')" : $col;
+        $bindings = [];
+        if ($tz && $tz !== 'UTC') {
+            $colSql = "($col at time zone 'UTC' at time zone ?)";
+            $bindings[] = $tz;
+        } else {
+            $colSql = $col;
+        }
+
         $format = match ($period) {
             'year'  => 'YYYY',
             'month' => 'YYYY-MM',
@@ -169,10 +190,11 @@ trait HasDynamicGroup {
             'hour'  => 'YYYY-MM-DD HH24:00',
             default => 'YYYY-MM-DD'
         };
-        return "TO_CHAR($colSql, '$format')";
+        
+        return ["TO_CHAR($colSql, '$format')", $bindings];
     }
 
-    protected function sqliteDateSql($col, $period)
+    protected function sqliteDateSql(string $col, string $period): string
     {
         $format = match ($period) {
             'year'  => '%Y',
