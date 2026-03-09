@@ -33,8 +33,11 @@ trait HasDynamicGroup {
      * @param array $input   Optional input data (defaults to request()->all())
      * @return Builder
      */
-    public function scopeDynamicGroupBy(Builder $q, array $allowed = [], array $default = [], array $ignore = [], array $input = []): Builder {
-        $input = $this->resolveDynamicInput($input);
+    public function scopeDynamicGroupBy(Builder $q, ?array $input = [], ?array $allowed = null, ?array $default = null, ?array $ignore = null): Builder {
+        $input = $this->resolveDynamicInput($input ?? []);
+        $allowed ??= [];
+        $default ??= [];
+        $ignore ??= [];
         $pGroup = config('dynamic-query.params.group', '_group');
 
         // Parse Input
@@ -60,9 +63,15 @@ trait HasDynamicGroup {
                 // Smart Join & Qualify
                 $qualified = $this->dynamicQualifyColumn($q, $field);
 
-                if ($macro) {
+                $validMacro = $this->validateMacro($macro);
+                if ($validMacro) {
                     // Date Grouping (SQL Generation)
-                    $this->applyDateGrouping($q, $qualified, $macro, $input);
+                    $this->applyDateGrouping($q, $qualified, $validMacro, $input, $field);
+                } else if ($macro) {
+                    // It's an alias! (e.g. status:st)
+                    $alias = $this->sanitizeAlias($macro);
+                    $q->selectRaw("$qualified as $alias");
+                    $q->groupByRaw('"' . $alias . '"'); 
                 } else {
                     // Standard Grouping
                     $q->groupBy($qualified);
@@ -97,7 +106,7 @@ trait HasDynamicGroup {
      * @param string $macro  Macro name (year|month|day|hour)
      * @param array  $input  Input data for timezone resolution
      */
-    protected function applyDateGrouping(Builder $q, string $column, string $macro, array $input = []): void
+    protected function applyDateGrouping(Builder $q, string $column, string $macro, array $input = [], ?string $field = null): void
     {
         $pTimezone = config('dynamic-query.params.timezone', '_timezone');
         $defaultTz = config('dynamic-query.defaults.timezone', 'UTC');
@@ -109,8 +118,8 @@ trait HasDynamicGroup {
         }
         $driver = $q->getConnection()->getDriverName();
 
-        // Alias: created_at_month
-        $alias = $this->sanitizeAlias($column . '_' . $macro);
+        // Alias: created_at_month (use field name instead of qualified column to avoid "posts_created_at_month")
+        $alias = $this->sanitizeAlias($field . '_' . $macro);
 
         $sqlData = match ($driver) {
             'mysql'  => $this->mysqlDateSql($column, $macro, $tz),
@@ -125,7 +134,12 @@ trait HasDynamicGroup {
             // NOTE: $bindings is intentionally passed to BOTH calls.
             // Each raw expression has its own '?' placeholder that needs the same $tz value.
             // If you add more '?' to the SQL template, duplicate bindings accordingly.
-            $q->groupByRaw($sql, $bindings);
+            if ($field !== $column && $field) {
+                // If it's an alias, we use it directly in groupBy if it's not a real column
+                $q->groupByRaw($this->sanitizeAlias($alias));
+            } else {
+                $q->groupByRaw($sql, $bindings);
+            }
             $q->selectRaw("$sql as $alias", $bindings);
         }
     }
@@ -198,9 +212,9 @@ trait HasDynamicGroup {
     {
         $format = match ($period) {
             'year'  => '%Y',
-            'month' => '%Y-%m',
-            'day'   => '%Y-%m-%d',
-            'hour'  => '%Y-%m-%d %H:00',
+            'month' => '%m',
+            'day'   => '%d',
+            'hour'  => '%H',
             default => '%Y-%m-%d'
         };
         return "strftime('$format', $col)";

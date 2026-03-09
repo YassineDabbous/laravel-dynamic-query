@@ -87,7 +87,10 @@ trait HasDynamicFields{
 
 
     /** Append only requests fields. */
-    public function dynamicAppend(array $fields = [], array $ignore = [], array $input = []): void {
+    public function dynamicAppend(?array $fields = [], ?array $ignore = [], ?array $input = null): void {
+        $input = $this->resolveDynamicInput($input);
+        $fields ??= [];
+        $ignore ??= [];
         $parsed = $this->parseFields($fields, $input);
         $list = array_keys($parsed['fields']);
         $list = array_diff($list, $ignore);
@@ -96,9 +99,22 @@ trait HasDynamicFields{
             // MERGE with existing visible (set by scopeDynamicSelect) instead of overwriting
             $existing = $this->getVisible();
             if (!empty($existing)) {
-                $this->setVisible(array_unique(array_merge($existing, $list)));
+                $merged = array_unique(array_merge($existing, $list));
+                // If a JSON path is requested, make the base column visible too
+                foreach ($list as $f) {
+                    if (str_contains($f, '->')) {
+                        $merged[] = explode('->', $f)[0];
+                    }
+                }
+                $this->setVisible(array_unique($merged));
             } else {
-                $this->setVisible($list);
+                $merged = $list;
+                foreach ($list as $f) {
+                    if (str_contains($f, '->')) {
+                        $merged[] = explode('->', $f)[0];
+                    }
+                }
+                $this->setVisible(array_unique($merged));
             }
 
             $dynamicAppends = $this->toAssociative($this->dynamicAppends());
@@ -121,6 +137,23 @@ trait HasDynamicFields{
         }
     }
 
+    /**
+     * Clean the model response to only include requested fields in toArray() / toJson().
+     * This uses setVisible() internally.
+     * 
+     * @param Model|null $model Model instance to clean (defaults to $this)
+     * @param array $fields Fields/Columns to keep
+     * @return Model
+     */
+    protected function cleanResponse(?Model $model = null, array $fields = []): Model
+    {
+        $model ??= $this;
+        if (!empty($fields) && !in_array('*', $fields)) {
+             $model->setVisible($fields);
+        }
+        return $model;
+    }
+
 
     /**
      * Apply dynamic field selection, relation loading, and aggregates.
@@ -139,8 +172,10 @@ trait HasDynamicFields{
      * @param array $input  Optional input data (defaults to request()->all())
      * @return Builder
      */
-    public function scopeDynamicSelect(Builder $q, array $fields = [], array $ignore = [], array $input = []): Builder {
-        $input = $this->resolveDynamicInput($input);
+    public function scopeDynamicSelect(Builder $q, ?array $input = [], ?array $fields = null, ?array $ignore = null): Builder {
+        $input = $this->resolveDynamicInput($input ?? []);
+        $fields ??= [];
+        $ignore ??= [];
         $parsed = $this->parseFields($fields, $input);
         $list = array_diff(array_keys($parsed['fields']), $ignore);
         $this->__dynamicQueryDeepFields = $parsed['deepFields'];
@@ -150,7 +185,11 @@ trait HasDynamicFields{
         }
 
         if (config('dynamic-query.settings.clean_response', true)) {
-             $this->setVisible($list);
+             $q->afterQuery(function($models) use ($list) {
+                 foreach ($models as $model) {
+                     $model->setVisible($list);
+                 }
+             });
         }
         
         $dynamicAppends = $this->toAssociative($this->dynamicAppends());
@@ -201,7 +240,10 @@ trait HasDynamicFields{
 
             if(count($selectableColumns)){
                  // This prevents trying to select relation names like "children" as columns.
-                $requestedColumns = array_intersect($selectableColumns, $list);
+                $requestedColumns = array_filter($list, function($field) use ($selectableColumns) {
+                    $baseColumn = str_contains($field, '->') ? explode('->', $field)[0] : $field;
+                    return in_array($baseColumn, $selectableColumns);
+                });
             } else {
                 $nonColumnFields = [
                     ...$dynamicRelationsNames,
@@ -215,6 +257,10 @@ trait HasDynamicFields{
             
             if(count($finalColumns)){
                  $q->select(array_unique($finalColumns));
+            } else {
+                // If no columns are explicitly selected after filtering, select at least the primary key
+                // to avoid "select *" which can happen if $finalColumns is empty.
+                $q->select($this->getTable() . '.' . $this->getKeyName());
             }
         }
 
@@ -226,13 +272,13 @@ trait HasDynamicFields{
                 $value = $dynamicAggregates[$key];
                 if(is_null($value)){
                     if($this->hasNamedScope(Str::camel($key))){ 
-                        $this->callNamedScope(Str::camel($key), [$q]);
+                        $q = $this->callNamedScope(Str::camel($key), [$q]);
                     }
                     continue;
                 }
                 if(is_string($value)){
                     if($this->hasNamedScope(Str::camel($value))){ 
-                        $this->callNamedScope(Str::camel($value), [$q]);
+                        $q = $this->callNamedScope(Str::camel($value), [$q]);
                     }
                     continue;
                 }
@@ -263,6 +309,23 @@ trait HasDynamicFields{
 
         $list = array_filter(array_map('trim', $list));
 
+        // Whitelist filtering
+        $selectableColumns = $this->dynamicColumns();
+        $dynamicRelations = array_keys($this->toAssociative($this->dynamicRelations()));
+        $dynamicAppends = array_keys($this->toAssociative($this->dynamicAppends()));
+        $dynamicAggregates = array_keys($this->toAssociative($this->dynamicAggregates()));
+
+        $allowed = array_merge($selectableColumns, $dynamicRelations, $dynamicAppends, $dynamicAggregates, ['*']);
+
+        $list = array_filter($list, function($field) use ($allowed) {
+             // Handle JSON paths: base column must be in allowed list
+             $base = str_contains($field, '->') ? explode('->', $field)[0] : $field;
+             // Handle relation subfields prefix: relation name must be in allowed list
+             $relationName = str_contains($base, ':') ? explode(':', $base)[0] : $base;
+
+             return in_array($relationName, $allowed);
+        });
+
         $res = [];
         $deepFields = [];
 
@@ -275,7 +338,7 @@ trait HasDynamicFields{
                 $res[] = $field;
             }
         }
-        
+
         return [
             'fields' => $this->normalizeAssociativeArray($res),
             'deepFields' => $deepFields,

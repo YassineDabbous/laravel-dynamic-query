@@ -30,21 +30,25 @@ trait HasDynamicSort {
      * @param array $input Optional input data (defaults to request()->all())
      * @return Builder
      */
-    public function scopeDynamicSort(
-        Builder $q,
-        array $allowed = [],
-        array $default = [],
-        array $ignore = [],
-        array $input = []
-    ): Builder {
-        $input = $this->resolveDynamicInput($input);
+    public function scopeDynamicSort(Builder $q, ?array $input = [], ?array $allowed = null, ?array $default = null, ?array $ignore = null): Builder {
+        $input = $this->resolveDynamicInput($input ?? []);
+        $allowed ??= [];
+        $default ??= [];
+        $ignore ??= [];
         $pSort = config('dynamic-query.params.sort', '_sort');
         $requested = $input[$pSort] ?? [];
         $list = is_array($requested) ? $requested : explode(',', $requested);
         $list = array_filter(array_map('trim', $list));
 
         if (empty($list) && !empty($default)) {
-            $list = is_array($default) ? $default : [$default];
+            $list = [];
+            foreach ($default as $key => $value) {
+                if (is_numeric($key)) {
+                    $list[] = $value;
+                } else {
+                    $list[] = ($value === 'desc' ? '-' : '') . $key;
+                }
+            }
         }
 
         if(count($list)){
@@ -78,11 +82,11 @@ trait HasDynamicSort {
      */
     public function scopeDynamicOrderBy(
         Builder $q,
-        array $allowed = [],
-        array $default = [],
-        array $ignore = [],
-        array $input = []
+        ?array $input = [],
+        ?array $allowed = [],
+        ?array $default = [],
+        ?array $ignore = []
     ): Builder {
-        return $this->scopeDynamicSort($q, $allowed, $default, $ignore, $input);
+        return $this->scopeDynamicSort($q, $input, $allowed, $default, $ignore);
     }
 }

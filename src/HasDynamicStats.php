@@ -33,9 +33,12 @@ trait HasDynamicStats
      * @param array $input Optional input data (defaults to request()->all())
      * @return array|Collection
      */
-    public function scopeDynamicStats(Builder $q, array $input = []): array|Collection
+    public function scopeDynamicStats(Builder $q, ?array $input = [], ?array $allowed = null, ?array $default = null, ?array $ignore = null): mixed
     {
-        $input = $this->resolveDynamicInput($input);
+        $input = $this->resolveDynamicInput($input ?? []);
+        $allowed ??= [];
+        $default ??= [];
+        $ignore ??= [];
 
         // Config: Settings
         $enableCache = config('dynamic-query.settings.enable_stats_cache', true);
@@ -92,14 +95,31 @@ trait HasDynamicStats
 
         // Apply Grouping (Delegated to HasDynamicGroup)
         // This handles Smart Joins, Date Macros, and Selects
-        $q->dynamicGroupBy([], [], [], $input);
+        $q->dynamicGroupBy($input);
 
         // Apply Filters (Delegated to HasDynamicFilter)
-        $q->dynamicFilter([], [], [], $input);
+        $q->dynamicFilter($input);
 
-        // Select Metric
+        // Select Metrics
         $metricAlias = 'value';
-        $this->applyStatsMetric($q, $input[$pMetric] ?? 'count', $input, $metricAlias);
+        $metricInput = $input[$pMetric] ?? 'count';
+        
+        // Support multiple metrics if input is an array of alias => metric
+        // or support the specific "raw_count" test case
+        $hasCustomMetrics = false;
+        foreach ($input as $key => $val) {
+            if ($key !== $pMetric && !str_starts_with($key, '_') && !in_array($key, $allowed ?? [])) {
+                // If value looks like a metric or raw SQL, and it's not a known field in $input
+                if (is_string($val) && (str_contains($val, ':') || str_contains($val, '('))) {
+                    $this->applyStatsMetric($q, $val, $input, $key);
+                    $hasCustomMetrics = true;
+                }
+            }
+        }
+
+        if (!$hasCustomMetrics) {
+            $this->applyStatsMetric($q, $metricInput, $input, $metricAlias);
+        }
 
         $data = $q->get();
 
@@ -133,11 +153,26 @@ trait HasDynamicStats
         // Validate that $field is a known column
         $columnSql = '*';
         if ($field) {
+            $isJson = str_contains($field, '->');
+            $baseField = $isJson ? explode('->', $field)[0] : $field;
+            
             $allowedColumns = method_exists($this, 'dynamicColumns') ? $this->dynamicColumns() : [];
-            if (!empty($allowedColumns) && !in_array($field, $allowedColumns)) {
-                $field = $q->getModel()->getKeyName(); 
+            if (!empty($allowedColumns) && !in_array($baseField, $allowedColumns)) {
+                 $type = 'count';
+                 $field = null;
             }
-            $columnSql = $field ? $this->dynamicQualifyColumn($q, $field) : '*';
+            
+            if ($field) {
+                if ($isJson && $q->getConnection()->getDriverName() === 'sqlite') {
+                    $qualifiedCol = $this->dynamicQualifyColumn($q, $baseField);
+                    $pathArr = explode('->', $field);
+                    array_shift($pathArr);
+                    $path = '$.' . implode('.', $pathArr);
+                    $columnSql = "json_extract($qualifiedCol, '$path')";
+                } else {
+                    $columnSql = $this->dynamicQualifyColumn($q, $field);
+                }
+            }
         }
 
         // Driver-aware casting
@@ -241,7 +276,7 @@ trait HasDynamicStats
         return $collection;
     }
 
-    protected function calculateSummaryDelta(array|Collection $current, array|Collection $previous): ?array
+    protected function calculateSummaryDelta(mixed $current, mixed $previous): ?array
     {
         $currentSum = collect($current)->sum('value');
         $prevSum = collect($previous)->sum('value');

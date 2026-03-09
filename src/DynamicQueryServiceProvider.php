@@ -7,9 +7,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder as BaseBuilder;
-use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Collection;
 use Illuminate\Http\Exceptions\HttpResponseException;
-use Illuminate\Pagination\AbstractPaginator;
 use Illuminate\Support\ServiceProvider;
 
 class DynamicQueryServiceProvider extends ServiceProvider
@@ -36,7 +36,7 @@ class DynamicQueryServiceProvider extends ServiceProvider
          * @param array $whitelist Allowed aliases
          * @param array $input Optional input data
          */
-        EloquentBuilder::macro('resolveDynamicModel', function(?string $default = null, array $whitelist = [], array $input = []){
+        EloquentBuilder::macro('resolveDynamicModel', function(?string $default = null, array $whitelist = [], ?array $input = null){
             if (empty($whitelist) && $default === null) {
                 throw new HttpResponseException(
                     response('dynamicModel requires either a $default or a $whitelist', 500)
@@ -59,13 +59,13 @@ class DynamicQueryServiceProvider extends ServiceProvider
         });
 
         /** @deprecated Use resolveDynamicModel instead. */
-        EloquentBuilder::macro('dynamicModel', function(?string $default = null, array $whitelist = [], array $input = []){
+        EloquentBuilder::macro('dynamicModel', function(?string $default = null, array $whitelist = [], ?array $input = null){
             return $this->resolveDynamicModel($default, $whitelist, $input);
         });
 
 
         // Dynamic model appends
-        $macro = function (array $fields = [], array $ignore = [], array $input = []) {
+        $macro = function (?array $fields = [], ?array $ignore = [], ?array $input = null) {
             foreach ($this as $model) {
                 if (method_exists($model, 'dynamicAppend')) {
                     $model->dynamicAppend($fields, $ignore, $input);
@@ -74,7 +74,7 @@ class DynamicQueryServiceProvider extends ServiceProvider
         };
 
         Collection::macro('dynamicAppend', $macro);
-        AbstractPaginator::macro('dynamicAppend', $macro);
+        EloquentCollection::macro('dynamicAppend', $macro);
 
 
         /**
@@ -84,7 +84,7 @@ class DynamicQueryServiceProvider extends ServiceProvider
          * @param array $input Optional input data
          * @param bool|null $allowGet Enable/disable _get_all programmatic control
          */
-        $macro = function (?int $maxPerPage = null, array $input = [], ?bool $allowGet = null, $columns = ['*'], $pageName = null, $page = null, $total = null) {
+        $macro = function (?int $maxPerPage = null, ?array $input = null, ?bool $allowGet = null, $columns = ['*'], $pageName = null, $page = null, $total = null) {
             $input = !empty($input) ? $input : request()->all();
             $pGetAll = config('dynamic-query.params.get_all', '_get_all');
             $pLimit = config('dynamic-query.params.limit', '_limit');
@@ -124,11 +124,27 @@ class DynamicQueryServiceProvider extends ServiceProvider
             $pSimple = config('dynamic-query.params.simple', '_simple');
             $isSimple = filter_var($input[$pSimple] ?? false, FILTER_VALIDATE_BOOLEAN);
 
-            if ($isSimple) {
-                return $this->simplePaginate($size, $columns, $pageName, $page);
+            $res = $isSimple 
+                ? $this->simplePaginate($size, $columns, $pageName, $page)
+                : $this->paginate($size, $columns, $pageName, $page, $total);
+
+            // Handle dynamic appends and fields on the result collection
+            $pAppend = config('dynamic-query.params.append', '_append');
+            $pFields = config('dynamic-query.params.fields', '_fields');
+            
+            if (isset($input[$pAppend]) || isset($input[$pFields])) {
+                $fields = isset($input[$pFields]) ? (is_array($input[$pFields]) ? $input[$pFields] : explode(',', $input[$pFields])) : [];
+                $appends = isset($input[$pAppend]) ? (is_array($input[$pAppend]) ? $input[$pAppend] : explode(',', $input[$pAppend])) : [];
+                
+                $res->getCollection()->transform(function($model) use ($appends, $fields, $input) {
+                    if (method_exists($model, 'dynamicAppend')) {
+                        $model->dynamicAppend(array_merge($appends, $fields), [], $input);
+                    }
+                    return $model;
+                });
             }
 
-            return $this->paginate($size, $columns, $pageName, $page, $total);
+            return $res;
         };
 
         EloquentBuilder::macro('dynamicPaginate', $macro);

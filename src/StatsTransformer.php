@@ -103,7 +103,7 @@ class StatsTransformer
                 'label' => empty($labelParts) ? 'Total' : implode(' - ', $labelParts),
                 'group' => (object) $groups, // Cast to object for JSON {}
                 'value' => (float) $value,
-                'previous_value' => $prevItem ? (float) (($prevItem->value ?? 0)) : null,
+                'previous_value' => $prevItem ? (float) (((object)$prevItem)->value ?? 0) : null,
                 'transforms' => (object) $transforms,
             ];
         })->values()->toArray();
@@ -135,8 +135,15 @@ class StatsTransformer
         $pTimezone  = config('dynamic-query.params.timezone', '_timezone');
         $pGroup     = config('dynamic-query.params.group', '_group');
 
+        $metricRaw = $this->input[$pMetric] ?? 'count';
+        [$metricType, $metricField] = array_pad(explode(':', $metricRaw), 2, null);
+
         return [
-            'metric' => $this->input[$pMetric] ?? 'count',
+            'metric' => [
+                'raw'   => $metricRaw,
+                'type'  => $metricType,
+                'field' => $metricField,
+            ],
             'currency' => config('dynamic-query.defaults.currency', config('app.currency', 'USD')),
             'timezone' => $this->input[$pTimezone] ?? 'UTC',
             'granularity' => $this->input[$pGroup] ?? null,

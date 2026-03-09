@@ -42,7 +42,7 @@ trait InteractsWithSmartJoins
             $ownerKey = $relation->getOwnerKeyName();
             $localTable = $this->getTable();
             
-            $query->leftJoin($relatedTable, "$localTable.$fk", '=', "$relatedTable.$ownerKey");
+            $query->join($relatedTable, "$localTable.$fk", '=', "$relatedTable.$ownerKey");
         } 
         elseif (is_a($relation, HasOneOrMany::class)) {
             $relatedTable = $relation->getRelated()->getTable();
@@ -50,7 +50,7 @@ trait InteractsWithSmartJoins
             $localKey = $relation->getLocalKeyName();
             $localTable = $this->getTable();
 
-            $query->leftJoin($relatedTable, "$localTable.$localKey", '=', "$relatedTable.$fk");
+            $query->join($relatedTable, "$localTable.$localKey", '=', "$relatedTable.$fk");
         }
     }
 
@@ -77,7 +77,7 @@ trait InteractsWithSmartJoins
     protected function dynamicQualifyColumn(Builder $query, string $field): string
     {
         if (!str_contains($field, '.')) {
-            return $this->getTable() . '.' . $field;
+            return method_exists($this, 'qualifyColumn') ? $this->qualifyColumn($field) : $this->getTable() . '.' . $field;
         }
 
         [$relation, $column] = explode('.', $field, 2);

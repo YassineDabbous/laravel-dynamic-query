@@ -8,4 +8,4 @@ Thumbs.db
 .phpunit.result.cache
 tests/storage
 test-results
-TODO
+.local

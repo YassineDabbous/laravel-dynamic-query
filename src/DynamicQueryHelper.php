@@ -84,4 +84,11 @@ class DynamicQueryHelper
 
         return array_unique($keys);
     }
+    /**
+     * Resolve recursive dependencies (alias for recursiveDependencies with swapped arguments for convenience).
+     */
+    public static function resolveRecursiveDependencies(array $keys, array $associative): array
+    {
+        return static::recursiveDependencies($associative, $keys);
+    }
 }
