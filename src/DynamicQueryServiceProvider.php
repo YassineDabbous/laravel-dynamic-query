@@ -142,6 +142,14 @@ class DynamicQueryServiceProvider extends ServiceProvider
                     }
                     return $model;
                 });
+            } elseif (array_is_list($input) && !empty($input)) {
+                // Indexed array of field names passed directly as $input
+                $res->getCollection()->transform(function($model) use ($input) {
+                    if (method_exists($model, 'dynamicAppend')) {
+                        $model->dynamicAppend($input, [], $input);
+                    }
+                    return $model;
+                });
             }
 
             return $res;
