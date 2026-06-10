@@ -9,16 +9,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: [8.1, 8.2, 8.3, 8.4, 8.5]
-        laravel: [8.*, 9.*, 10.*, 11.*, 12.*, 13.*]
+        php: [8.2, 8.3, 8.4, 8.5]
+        laravel: [12.*, 13.*]
 
         exclude:
-          - php: 8.1
-            laravel: 11.*
-          - php: 8.1
-            laravel: 12.*
-          - php: 8.1
-            laravel: 13.*
           - php: 8.2
             laravel: 13.*
 
@@ -37,19 +31,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          if [ "${{ matrix.laravel }}" = "8.*" ]; then TESTBENCH="^6.0"; fi
-          if [ "${{ matrix.laravel }}" = "9.*" ]; then TESTBENCH="^7.0"; fi
-          if [ "${{ matrix.laravel }}" = "10.*" ]; then TESTBENCH="^8.0"; fi
-          if [ "${{ matrix.laravel }}" = "11.*" ]; then TESTBENCH="^9.0"; fi
-          if [ "${{ matrix.laravel }}" = "12.*" ]; then TESTBENCH="^10.0"; fi
-          if [ "${{ matrix.laravel }}" = "13.*" ]; then TESTBENCH="^11.0"; fi
+          composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update
           
-          jq '.config += {"policy.advisories.block": false, "audit.abandoned": "ignore"}' composer.json > temp.json && mv temp.json composer.json
+          if [ "${{ matrix.laravel }}" = "12.*" ]; then TESTBENCH="^10.0"; else TESTBENCH="^11.0"; fi
+          composer require "orchestra/testbench:${TESTBENCH}" --dev --no-interaction --no-update
           
-          composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update --no-audit
-          composer require "orchestra/testbench:${TESTBENCH}" --dev --no-interaction --no-update --no-audit
-          
-          composer update --prefer-dist --no-interaction --no-audit
+          composer update --prefer-dist --no-interaction
 
       - name: Execute tests
         run: vendor/bin/phpunit
