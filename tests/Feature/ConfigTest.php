@@ -6,16 +6,14 @@ use YassineDabbous\DynamicQuery\Tests\TestCase;
 
 class ConfigTest extends TestCase
 {
-    /** @test */
-    public function it_has_all_config_keys_loaded()
+    public function test_it_has_all_config_keys_loaded()
     {
         $this->assertNotNull(config('dynamic-query.defaults.per_page'));
         $this->assertNotNull(config('dynamic-query.settings.strict_filtering'));
         $this->assertNotNull(config('dynamic-query.params.fields'));
     }
 
-    /** @test */
-    public function it_respects_custom_param_names()
+    public function test_it_respects_custom_param_names()
     {
         config(['dynamic-query.params.fields' => 'custom_fields']);
         

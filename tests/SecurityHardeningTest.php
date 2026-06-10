@@ -25,15 +25,13 @@ class SecurityHardeningTest extends TestCase
         SecureModel::create(['name' => 'Safe', 'secret_key' => 'shhh', 'amount' => 100]);
     }
 
-    /** @test */
-    public function it_defaults_to_empty_appends_to_prevent_leakage()
+    public function test_it_defaults_to_empty_appends_to_prevent_leakage()
     {
         $model = new SecureModel();
         $this->assertEquals([], $model->dynamicAppends());
     }
 
-    /** @test */
-    public function it_whitelists_columns_for_dynamic_select()
+    public function test_it_whitelists_columns_for_dynamic_select()
     {
         // When searching for 'secret_key' which is NOT in whitelisted columns
         $query = SecureModel::dynamicSelect(['id', 'name', 'secret_key']);
@@ -45,8 +43,7 @@ class SecurityHardeningTest extends TestCase
         $this->assertStringContainsString('name', $sql);
     }
 
-    /** @test */
-    public function it_sanitizes_metric_aliases_in_stats()
+    public function test_it_sanitizes_metric_aliases_in_stats()
     {
         // Metric with a dangerous alias component
         $input = [
@@ -66,8 +63,7 @@ class SecurityHardeningTest extends TestCase
         }
     }
 
-    /** @test */
-    public function it_parameterizes_timezone_in_group_by()
+    public function test_it_parameterizes_timezone_in_group_by()
     {
         $input = [
             '_group' => 'created_at:day',

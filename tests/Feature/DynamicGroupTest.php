@@ -19,61 +19,61 @@ class DynamicGroupTest extends TestCase
         Post::forceCreate(['title' => 'P3', 'status' => 'inactive', 'user_id' => 1, 'created_at' => '2024-02-15 10:00:00']);
     }
 
-    /** @test */
-    public function it_groups_by_single_col() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'status'], ['status'])->get()); }
-    /** @test */
-    public function it_groups_by_multiple_cols() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'status,user_id'], ['status','user_id'])->get()); }
-    /** @test */
-    public function it_supports_array_input() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>['status','user_id']], ['status','user_id'])->get()); }
-    /** @test */
-    public function it_ignores_non_whitelisted() { $q = Post::dynamicGroupBy(['_group'=>'user_id'], ['status']); $this->assertStringNotContainsString('group by "user_id"', $q->toSql()); }
-    /** @test */
-    public function it_respects_ignore_param() { $q = Post::dynamicGroupBy(['_group'=>'status'], ['status'], [], ['status']); $this->assertStringNotContainsString('group by "status"', $q->toSql()); }
-    /** @test */
-    public function it_applies_defaults() { $this->assertStringContainsString('group by "posts"."status"', Post::dynamicGroupBy([], ['status'], ['status'])->toSql()); }
-    /** @test */
-    public function it_validates_defaults() { $this->assertStringNotContainsString('group by "user_id"', Post::dynamicGroupBy([], ['status'], ['user_id'])->toSql()); }
-    /** @test */
-    public function it_groups_by_year() { $res = Post::dynamicGroupBy(['_group'=>'created_at:year'], ['created_at'])->get(); $this->assertCount(1, $res); }
-    /** @test */
-    public function it_groups_by_month() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'created_at:month'], ['created_at'])->get()); }
-    /** @test */
-    public function it_groups_by_day() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'created_at:day'], ['created_at'])->get()); }
-    /** @test */
-    public function it_groups_by_hour() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'created_at:hour'], ['created_at'])->get()); }
-    /** @test */
-    public function it_ignores_invalid_macro() { $q = Post::dynamicGroupBy(['_group'=>'created_at:week'], ['created_at']); $this->assertStringNotContainsString('strftime', $q->toSql()); }
-    /** @test */
-    public function it_joins_relation_for_grouping() { $q = Post::dynamicGroupBy(['_group'=>'user.name'], ['user.name']); $this->assertStringContainsString('inner join "users"', $q->toSql()); }
-    /** @test */
-    public function it_qualifies_group_columns() { $q = Post::dynamicGroupBy(['_group'=>'status'], ['status']); $this->assertStringContainsString('"posts"."status"', $q->toSql()); }
-    /** @test */
-    public function it_handles_json_path_grouping() { $q = Post::dynamicGroupBy(['_group'=>'meta->key'], ['meta->key']); $this->assertStringContainsString('json_extract', $q->toSql()); }
-    /** @test */
-    public function it_handles_multiple_date_macros() { $q = Post::dynamicGroupBy(['_group'=>'created_at:year,created_at:month'], ['created_at']); $this->assertStringContainsString('created_at_year', $q->toSql()); $this->assertStringContainsString('created_at_month', $q->toSql()); }
-    /** @test */
-    public function it_validates_timezones_utc() { $model = new Post(); $this->assertEquals('UTC', $this->callProtectedMethod($model, 'validateTimezone', ['Invalid'])); }
-    /** @test */
-    public function it_accepts_valid_named_timezone() { $model = new Post(); $this->assertEquals('Europe/London', $this->callProtectedMethod($model, 'validateTimezone', ['Europe/London'])); }
-    /** @test */
-    public function it_accepts_offset_timezone() { $model = new Post(); $this->assertEquals('+02:00', $this->callProtectedMethod($model, 'validateTimezone', ['+02:00'])); }
-    /** @test */
-    public function it_sanitizes_group_alias() { $model = new Post(); $this->assertEquals('posts_status', $this->callProtectedMethod($model, 'sanitizeAlias', ['posts.status'])); }
-    /** @test */
-    public function it_handles_null_group_input() { $this->assertNotEmpty(Post::dynamicGroupBy(null)->get()); }
-    /** @test */
-    public function it_groups_by_aliased_column() { 
+    
+    public function test_it_groups_by_single_col() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'status'], ['status'])->get()); }
+    
+    public function test_it_groups_by_multiple_cols() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'status,user_id'], ['status','user_id'])->get()); }
+    
+    public function test_it_supports_array_input() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>['status','user_id']], ['status','user_id'])->get()); }
+    
+    public function test_it_ignores_non_whitelisted() { $q = Post::dynamicGroupBy(['_group'=>'user_id'], ['status']); $this->assertStringNotContainsString('group by "user_id"', $q->toSql()); }
+    
+    public function test_it_respects_ignore_param() { $q = Post::dynamicGroupBy(['_group'=>'status'], ['status'], [], ['status']); $this->assertStringNotContainsString('group by "status"', $q->toSql()); }
+    
+    public function test_it_applies_defaults() { $this->assertStringContainsString('group by "posts"."status"', Post::dynamicGroupBy([], ['status'], ['status'])->toSql()); }
+    
+    public function test_it_validates_defaults() { $this->assertStringNotContainsString('group by "user_id"', Post::dynamicGroupBy([], ['status'], ['user_id'])->toSql()); }
+    
+    public function test_it_groups_by_year() { $res = Post::dynamicGroupBy(['_group'=>'created_at:year'], ['created_at'])->get(); $this->assertCount(1, $res); }
+    
+    public function test_it_groups_by_month() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'created_at:month'], ['created_at'])->get()); }
+    
+    public function test_it_groups_by_day() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'created_at:day'], ['created_at'])->get()); }
+    
+    public function test_it_groups_by_hour() { $this->assertCount(2, Post::dynamicGroupBy(['_group'=>'created_at:hour'], ['created_at'])->get()); }
+    
+    public function test_it_ignores_invalid_macro() { $q = Post::dynamicGroupBy(['_group'=>'created_at:week'], ['created_at']); $this->assertStringNotContainsString('strftime', $q->toSql()); }
+    
+    public function test_it_joins_relation_for_grouping() { $q = Post::dynamicGroupBy(['_group'=>'user.name'], ['user.name']); $this->assertStringContainsString('inner join "users"', $q->toSql()); }
+    
+    public function test_it_qualifies_group_columns() { $q = Post::dynamicGroupBy(['_group'=>'status'], ['status']); $this->assertStringContainsString('"posts"."status"', $q->toSql()); }
+    
+    public function test_it_handles_json_path_grouping() { $q = Post::dynamicGroupBy(['_group'=>'meta->key'], ['meta->key']); $this->assertStringContainsString('json_extract', $q->toSql()); }
+    
+    public function test_it_handles_multiple_date_macros() { $q = Post::dynamicGroupBy(['_group'=>'created_at:year,created_at:month'], ['created_at']); $this->assertStringContainsString('created_at_year', $q->toSql()); $this->assertStringContainsString('created_at_month', $q->toSql()); }
+    
+    public function test_it_validates_timezones_utc() { $model = new Post(); $this->assertEquals('UTC', $this->callProtectedMethod($model, 'validateTimezone', ['Invalid'])); }
+    
+    public function test_it_accepts_valid_named_timezone() { $model = new Post(); $this->assertEquals('Europe/London', $this->callProtectedMethod($model, 'validateTimezone', ['Europe/London'])); }
+    
+    public function test_it_accepts_offset_timezone() { $model = new Post(); $this->assertEquals('+02:00', $this->callProtectedMethod($model, 'validateTimezone', ['+02:00'])); }
+    
+    public function test_it_sanitizes_group_alias() { $model = new Post(); $this->assertEquals('posts_status', $this->callProtectedMethod($model, 'sanitizeAlias', ['posts.status'])); }
+    
+    public function test_it_handles_null_group_input() { $this->assertNotEmpty(Post::dynamicGroupBy(null)->get()); }
+    
+    public function test_it_groups_by_aliased_column() { 
         $q = Post::selectRaw('status as st')->dynamicGroupBy(['_group'=>'st'], ['st', 'status']); 
         $this->assertMatchesRegularExpression('/group by (["`]?posts["`]?\.)?["`]?st["`]?/i', $q->toSql()); 
     }
-    /** @test */
-    public function it_handles_empty_string_group() { $this->assertNotEmpty(Post::dynamicGroupBy(['_group'=>''], ['status'])->get()); }
-    /** @test */
-    public function it_preserves_selects_when_grouping() { $q = Post::select('id')->dynamicGroupBy(['_group'=>'status'], ['status']); $this->assertStringContainsString('select "id"', $q->toSql()); }
-    /** @test */
-    public function it_handles_integer_column_grouping() { $this->assertNotEmpty(Post::dynamicGroupBy(['_group'=>'user_id'], ['user_id'])->get()); }
-    /** @test */
-    public function it_works_with_custom_param_name() { config(['dynamic-query.params.group'=>'g']); $this->assertCount(2, Post::dynamicGroupBy(['g'=>'status'], ['status'])->get()); }
+    
+    public function test_it_handles_empty_string_group() { $this->assertNotEmpty(Post::dynamicGroupBy(['_group'=>''], ['status'])->get()); }
+    
+    public function test_it_preserves_selects_when_grouping() { $q = Post::select('id')->dynamicGroupBy(['_group'=>'status'], ['status']); $this->assertStringContainsString('select "id"', $q->toSql()); }
+    
+    public function test_it_handles_integer_column_grouping() { $this->assertNotEmpty(Post::dynamicGroupBy(['_group'=>'user_id'], ['user_id'])->get()); }
+    
+    public function test_it_works_with_custom_param_name() { config(['dynamic-query.params.group'=>'g']); $this->assertCount(2, Post::dynamicGroupBy(['g'=>'status'], ['status'])->get()); }
 
     protected function callProtectedMethod($object, $method, array $args = []) {
         $reflection = new \ReflectionClass(get_class($object));

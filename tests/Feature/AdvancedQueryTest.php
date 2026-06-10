@@ -35,8 +35,7 @@ class AdvancedQueryTest extends TestCase
         Post::create(['title' => 'Alice Post 2', 'likes' => 20, 'meta' => ['deep' => ['key' => 'value2']]]);
     }
 
-    /** @test */
-    public function it_chains_select_filter_and_sort()
+    public function test_it_chains_select_filter_and_sort()
     {
         $result = Post::dynamicSelect([], ['id', 'title'])
             ->dynamicFilter(['likes' => '>5'])
@@ -48,8 +47,7 @@ class AdvancedQueryTest extends TestCase
         $this->assertArrayNotHasKey('count', $result->first()->toArray());
     }
 
-    /** @test */
-    public function it_chains_filter_group_and_stats()
+    public function test_it_chains_filter_group_and_stats()
     {
         $result = Post::dynamicStats([
                 '_metric' => 'sum:likes',
@@ -60,8 +58,7 @@ class AdvancedQueryTest extends TestCase
         $this->assertEquals(30, $result->first()->value);
     }
 
-    /** @test */
-    public function it_handles_deep_nested_joins_and_filters()
+    public function test_it_handles_deep_nested_joins_and_filters()
     {
         // This test is now irrelevant as user_id is removed from posts.
         // Keeping it for now, but it will fail or be ignored.
@@ -71,27 +68,23 @@ class AdvancedQueryTest extends TestCase
         $this->assertTrue(true); // Placeholder to prevent test failure
     }
 
-    /** @test */
-    public function it_handles_json_input_in_paginator_appends() {
+    public function test_it_handles_json_input_in_paginator_appends() {
         $res = Post::dynamicPaginate(15, ['meta->key']);
         $visible = $res->first()->getVisible();
         // Use a more relaxed check for properties as they might be encoded or have different visibility in some envs
         $found = in_array('meta->key', $visible) || in_array('meta-&gt;key', $visible) || in_array('meta', $visible);
         $this->assertTrue($found, "Failed asserting that " . json_encode($visible) . " contains 'meta->key'");
     }
-    /** @test */
-    public function it_handles_multilevel_json_select() { 
+    public function test_it_handles_multilevel_json_select() { 
         $sql = Post::dynamicSelect([], ['meta->deep->key'])->toSql();
         $this->assertTrue(str_contains($sql, 'meta') && str_contains($sql, 'deep') && str_contains($sql, 'key'));
     }
-    /** @test */
-    public function it_selects_multiple_json_fields() { 
+    public function test_it_selects_multiple_json_fields() { 
         $sql = Post::dynamicSelect([], ['meta->a', 'meta->b'])->toSql();
         $this->assertTrue(str_contains($sql, 'meta') && str_contains($sql, 'a') && str_contains($sql, 'b'));
     }
 
-    /** @test */
-    public function it_applies_date_presets_and_stats_together()
+    public function test_it_applies_date_presets_and_stats_together()
     {
         $result = Post::dynamicStats([
             '_metric' => 'count',
@@ -100,8 +93,7 @@ class AdvancedQueryTest extends TestCase
         $this->assertEquals(2, $result->first()->value);
     }
 
-    /** @test */
-    public function it_handles_multiple_group_by_with_macros_and_regular_columns()
+    public function test_it_handles_multiple_group_by_with_macros_and_regular_columns()
     {
         $query = Post::dynamicGroupBy(['_group' => 'user_id,created_at:month'], ['user_id', 'created_at']);
         $sql = $query->toSql();
@@ -109,31 +101,27 @@ class AdvancedQueryTest extends TestCase
         $this->assertStringContainsString('strftime', $sql);
     }
 
-    /** @test */
-    public function it_resolves_complex_append_dependencies_in_chained_queries()
+    public function test_it_resolves_complex_append_dependencies_in_chained_queries()
     {
         // slug depends on title
         $post = Post::dynamicSelect([], ['slug'])->first();
         $this->assertNotNull($post->slug);
     }
 
-    /** @test */
-    public function it_works_with_eloquent_scopes_mixed_in()
+    public function test_it_works_with_eloquent_scopes_mixed_in()
     {
         // Add a local scope to Post model in your mind or here
         $query = Post::where('likes', '>', 0)->dynamicFilter(['likes' => 10]);
         $this->assertCount(1, $query->get());
     }
 
-    /** @test */
-    public function it_handles_null_input_to_all_scopes_gracefully()
+    public function test_it_handles_null_input_to_all_scopes_gracefully()
     {
         $query = Post::dynamicSelect(null)->dynamicFilter(null)->dynamicSort(null)->dynamicGroupBy(null);
         $this->assertNotEmpty($query->get());
     }
 
-    /** @test */
-    public function it_correctly_identifies_json_fields_for_all_database_operations()
+    public function test_it_correctly_identifies_json_fields_for_all_database_operations()
     {
         $model = new Post();
         // Use a more robust check for the protected method
@@ -154,8 +142,7 @@ class AdvancedQueryTest extends TestCase
         throw new \ReflectionException("Method {$method} does not exist in hierarchy.");
     }
 
-    /** @test */
-    public function it_prevents_sql_injection_across_all_chained_methods()
+    public function test_it_prevents_sql_injection_across_all_chained_methods()
     {
         $malicious = [
             'title' => "'; DROP TABLE users; --",

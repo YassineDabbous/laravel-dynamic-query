@@ -8,15 +8,13 @@ use YassineDabbous\DynamicQuery\Contracts\DynamicQueryable;
 
 class ContractTest extends TestCase
 {
-    /** @test */
-    public function it_implements_dynamic_queryable_interface()
+    public function test_it_implements_dynamic_queryable_interface()
     {
         $user = new User();
         $this->assertInstanceOf(DynamicQueryable::class, $user);
     }
 
-    /** @test */
-    public function it_has_required_methods_from_contract()
+    public function test_it_has_required_methods_from_contract()
     {
         $user = new User();
         $this->assertTrue(method_exists($user, 'dynamicColumns'));
