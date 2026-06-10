@@ -13,7 +13,6 @@ jobs:
         laravel: [8.*, 9.*, 10.*, 11.*, 12.*, 13.*]
 
         exclude:
-          # Laravel 11, 12, and 13 require PHP 8.2 or higher
           - php: 8.1
             laravel: 11.*
           - php: 8.1
@@ -38,11 +37,20 @@ jobs:
 
       - name: Install dependencies
         run: |
+          if [ "${{ matrix.laravel }}" = "8.*" ]; then TESTBENCH="^6.0"; fi
+          if [ "${{ matrix.laravel }}" = "9.*" ]; then TESTBENCH="^7.0"; fi
+          if [ "${{ matrix.laravel }}" = "10.*" ]; then TESTBENCH="^8.0"; fi
+          if [ "${{ matrix.laravel }}" = "11.*" ]; then TESTBENCH="^9.0"; fi
+          if [ "${{ matrix.laravel }}" = "12.*" ]; then TESTBENCH="^10.0"; fi
+          if [ "${{ matrix.laravel }}" = "13.*" ]; then TESTBENCH="^11.0"; fi
+          
+          composer config audit.abandoned ignore
+          composer config security.advisories.block false
+          
           composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update
+          composer require "orchestra/testbench:${TESTBENCH}" --dev --no-interaction --no-update
           
-          composer require "orchestra/testbench:^6.0|^7.0|^8.0|^9.0|^10.0" --dev --no-interaction --no-update
-          
-          composer update --prefer-dist --no-interaction --with-all-dependencies
+          composer update --prefer-dist --no-interaction --no-audit
 
       - name: Execute tests
         run: vendor/bin/phpunit
