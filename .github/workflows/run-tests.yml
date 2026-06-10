@@ -44,8 +44,7 @@ jobs:
           if [ "${{ matrix.laravel }}" = "12.*" ]; then TESTBENCH="^10.0"; fi
           if [ "${{ matrix.laravel }}" = "13.*" ]; then TESTBENCH="^11.0"; fi
           
-          composer config config.policy.advisories.block false
-          composer config config.audit.abandoned ignore
+          jq '.config += {"policy.advisories.block": false, "audit.abandoned": "ignore"}' composer.json > temp.json && mv temp.json composer.json
           
           composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update --no-audit
           composer require "orchestra/testbench:${TESTBENCH}" --dev --no-interaction --no-update --no-audit
