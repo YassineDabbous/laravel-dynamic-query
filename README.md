@@ -49,8 +49,8 @@ Let your API consumers select fields, filter, sort, group, paginate, and compute
 
 ## Requirements
 
-- PHP >= 8.0
-- Laravel 8.x / 9.x / 10.x / 11.x
+- PHP >= 8.1
+- Laravel 12.x / 13.x
 
 ---
 

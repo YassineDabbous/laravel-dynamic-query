@@ -17,9 +17,9 @@
 
 | Dependency | Version |
 |------------|---------|
-| PHP | >= 8.0 |
-| Laravel (illuminate/support) | 8.x, 9.x, 10.x, 11.x |
-| Laravel (illuminate/database) | 8.x, 9.x, 10.x, 11.x |
+| PHP | >= 8.1 |
+| Laravel (illuminate/support) | 12.x, 13.x |
+| Laravel (illuminate/database) | 12.x, 13.x |
 
 ---
 
