@@ -33,7 +33,7 @@ trait HasDynamicQuery{
                     ->dynamicFilter([], [], [], $input)
                     ->dynamicSort([], [], $input)
                     ->dynamicGroupBy([], [], [], $input)
-                    ->dynamicPaginate([], $input);
+                    ->dynamicPaginate(null, $input);
         
         if (method_exists($result, 'dynamicAppend')) {
             $result->dynamicAppend([], [], $input);
